@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ARIA — AI Inventory System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="bg-orbs">
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+</div>
+
+<!-- Sidebar -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-header">
+    <div class="logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M2 17l10 5 10-5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M2 12l10 5 10-5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+      </div>
+      <div>
+        <span class="logo-name">ARIA</span>
+        <span class="logo-sub">Inventory AI</span>
+      </div>
+    </div>
+    <button class="sidebar-toggle" id="sidebarToggle">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+    </button>
+  </div>
+
+  <!-- Stats Cards -->
+  <div class="stats-grid" id="statsGrid">
+    <div class="stat-card">
+      <span class="stat-label">Products</span>
+      <span class="stat-value" id="statTotal">—</span>
+    </div>
+    <div class="stat-card accent">
+      <span class="stat-label">Value</span>
+      <span class="stat-value" id="statValue">—</span>
+    </div>
+    <div class="stat-card warn">
+      <span class="stat-label">Low Stock</span>
+      <span class="stat-value" id="statLow">—</span>
+    </div>
+    <div class="stat-card danger">
+      <span class="stat-label">Out of Stock</span>
+      <span class="stat-value" id="statOut">—</span>
+    </div>
+  </div>
+
+  <nav class="nav-menu">
+    <button class="nav-item active" data-panel="chat">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+      <span>AI Assistant</span>
+    </button>
+    <button class="nav-item" data-panel="products">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+      <span>Products</span>
+    </button>
+    <button class="nav-item" data-panel="add">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
+      <span>Add Product</span>
+    </button>
+    <button class="nav-item" data-panel="transactions">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      <span>Transactions</span>
+    </button>
+    <button class="nav-item" data-panel="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/></svg>
+      <span>Settings</span>
+    </button>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="ai-badge">
+      <div class="ai-dot"></div>
+      <span>Powered by Llama 3.1</span>
+    </div>
+  </div>
+</aside>
+
+<!-- Main Content -->
+<main class="main" id="main">
+  <!-- Header -->
+  <header class="top-bar">
+    <div class="top-bar-left">
+      <button class="mobile-menu-btn" id="mobileMenu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+      </button>
+      <h1 class="page-title" id="pageTitle">AI Assistant</h1>
+    </div>
+    <div class="top-bar-right">
+      <div class="search-bar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        <input type="text" placeholder="Search inventory..." id="globalSearch">
+      </div>
+      <div class="alert-bell" id="alertBell">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
+        <span class="alert-count" id="alertCount">0</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Panels -->
+
+  <!-- Chat Panel -->
+  <div class="panel active" id="panel-chat">
+    <div class="chat-container">
+      <div class="chat-messages" id="chatMessages">
+        <div class="chat-welcome">
+          <div class="welcome-avatar">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5z" stroke="currentColor" stroke-width="1.5"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="1.5"/></svg>
+          </div>
+          <h2>Hello, I'm ARIA</h2>
+          <p>Your AI-powered inventory assistant. Ask me anything about your inventory — I can add products, update stock, generate reports, and much more.</p>
+          <div class="quick-prompts">
+            <button class="quick-btn" data-prompt="Show me the current inventory status and any items that need attention">📊 Inventory Status</button>
+            <button class="quick-btn" data-prompt="Which items are low on stock or out of stock?">⚠️ Stock Alerts</button>
+            <button class="quick-btn" data-prompt="Add a new product: MacBook Pro 14 inch, SKU ELEC-010, Electronics category, quantity 15, price $1999, supplier Apple Inc">➕ Add Sample Product</button>
+            <button class="quick-btn" data-prompt="Give me a full inventory report with total value and category breakdown">📋 Full Report</button>
+          </div>
+        </div>
+      </div>
+      <div class="chat-input-area">
+        <div class="chat-input-wrap">
+          <textarea id="chatInput" placeholder="Ask ARIA anything... 'Add 50 units of Wireless Keyboard' or 'What's our total inventory value?'" rows="1"></textarea>
+          <button class="send-btn" id="sendBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+          </button>
+        </div>
+        <p class="chat-hint">ARIA can add, update, delete products and manage stock directly from chat</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Products Panel -->
+  <div class="panel" id="panel-products">
+    <div class="panel-header">
+      <div class="filter-row">
+        <input type="text" class="filter-input" id="productSearch" placeholder="Search products...">
+        <select class="filter-select" id="categoryFilter">
+          <option value="">All Categories</option>
+        </select>
+        <button class="btn-primary" onclick="switchPanel('add')">+ Add Product</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="glass-table">
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>SKU</th>
+            <th>Category</th>
+            <th>Qty</th>
+            <th>Price</th>
+            <th>Value</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="productTableBody">
+          <tr><td colspan="8" class="loading-cell">Loading products...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Add Product Panel -->
+  <div class="panel" id="panel-add">
+    <div class="form-container">
+      <h2 class="form-title" id="formTitle">Add New Product</h2>
+      <input type="hidden" id="editProductId">
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Product Name *</label>
+          <input type="text" id="fName" placeholder="e.g. Wireless Keyboard">
+        </div>
+        <div class="form-group">
+          <label>SKU *</label>
+          <input type="text" id="fSku" placeholder="e.g. ELEC-001">
+        </div>
+        <div class="form-group">
+          <label>Category</label>
+          <input type="text" id="fCategory" placeholder="e.g. Electronics">
+        </div>
+        <div class="form-group">
+          <label>Quantity</label>
+          <input type="number" id="fQty" placeholder="0" min="0">
+        </div>
+        <div class="form-group">
+          <label>Unit Price ($)</label>
+          <input type="number" id="fPrice" placeholder="0.00" step="0.01" min="0">
+        </div>
+        <div class="form-group">
+          <label>Supplier</label>
+          <input type="text" id="fSupplier" placeholder="Supplier name">
+        </div>
+        <div class="form-group">
+          <label>Low Stock Threshold</label>
+          <input type="number" id="fThreshold" placeholder="10" min="0">
+        </div>
+        <div class="form-group full-width">
+          <label>Description</label>
+          <textarea id="fDescription" rows="3" placeholder="Optional product description..."></textarea>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn-ghost" onclick="clearForm()">Clear</button>
+        <button class="btn-primary" id="saveProductBtn" onclick="saveProduct()">Save Product</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Transactions Panel -->
+  <div class="panel" id="panel-transactions">
+    <div class="panel-header">
+      <h3>Recent Transactions</h3>
+      <button class="btn-ghost" onclick="loadTransactions()">↻ Refresh</button>
+    </div>
+    <div class="table-wrap">
+      <table class="glass-table">
+        <thead>
+          <tr><th>Date</th><th>Product</th><th>Type</th><th>Quantity</th><th>Note</th></tr>
+        </thead>
+        <tbody id="transactionTableBody">
+          <tr><td colspan="5" class="loading-cell">Loading transactions...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Settings Panel -->
+  <div class="panel" id="panel-settings">
+    <div class="form-container">
+      <h2 class="form-title">Settings</h2>
+      <div class="settings-section">
+        <h3 class="settings-section-title">🔑 Groq API Key</h3>
+        <p class="settings-desc">Enter your Groq API key to enable AI features. Get one free at <a href="https://console.groq.com" target="_blank">console.groq.com</a></p>
+        <div class="form-group">
+          <label>API Key</label>
+          <div class="api-key-wrap">
+            <input type="password" id="apiKeyInput" placeholder="gsk_...">
+            <button class="btn-ghost" id="toggleKey" onclick="toggleApiKey()">Show</button>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn-primary" onclick="saveApiKey()">Save API Key</button>
+        </div>
+        <div id="apiKeyStatus" class="status-msg"></div>
+      </div>
+
+      <div class="settings-section">
+        <h3 class="settings-section-title">🗄️ Database</h3>
+        <p class="settings-desc">Manage your inventory database</p>
+        <div class="form-actions">
+          <button class="btn-ghost danger-btn" onclick="confirmClearData()">Reset All Data</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3 class="settings-section-title">ℹ️ About</h3>
+        <div class="about-grid">
+          <div class="about-item"><span>Model</span><code>llama-3.1-8b-instant</code></div>
+          <div class="about-item"><span>Provider</span><code>Groq</code></div>
+          <div class="about-item"><span>Framework</span><code>Flask + SQLAlchemy</code></div>
+          <div class="about-item"><span>Version</span><code>1.0.0</code></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- Stock Update Modal -->
+<div class="modal-overlay" id="stockModal">
+  <div class="modal glass-card">
+    <div class="modal-header">
+      <h3 id="stockModalTitle">Update Stock</h3>
+      <button class="modal-close" onclick="closeModal('stockModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="stockProductId">
+      <div class="form-group">
+        <label>Action</label>
+        <div class="btn-group">
+          <button class="btn-toggle active" data-action="add">+ Add Stock</button>
+          <button class="btn-toggle" data-action="remove">− Remove Stock</button>
+          <button class="btn-toggle" data-action="set">= Set Quantity</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Quantity</label>
+        <input type="number" id="stockQty" min="0" placeholder="0">
+      </div>
+      <div class="form-group">
+        <label>Note</label>
+        <input type="text" id="stockNote" placeholder="Reason for change...">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost" onclick="closeModal('stockModal')">Cancel</button>
+      <button class="btn-primary" onclick="submitStockUpdate()">Update Stock</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
