@@ -5,11 +5,13 @@ import json
 import os
 import re
 from groq import Groq
+from dotenv import load_dotenv
+load_dotenv()
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///inventory.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = 'inventory-ai-secret-key'
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY')
 
 db = SQLAlchemy(app)
 
@@ -249,10 +251,10 @@ You have access to the current inventory data provided in each message. You can 
 def chat():
     data = request.json
     messages = data.get('messages', [])
-    api_key = data.get('api_key', GROQ_API_KEY)
+    api_key = GROQ_API_KEY
 
     if not api_key:
-        return jsonify({'error': 'Groq API key not configured. Please add your API key in settings.'}), 400
+        return jsonify({'error': 'Server API key not configured. Contact admin.'}), 400
 
     stats, product_list = get_inventory_context()
     inventory_context = f"""

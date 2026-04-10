@@ -1,7 +1,7 @@
 // ─── State ────────────────────────────────────────────────────────────────────
 const state = {
   chatHistory: [],
-  apiKey: localStorage.getItem('groq_api_key') || '',
+  apiKey: null,
   currentStockAction: 'add',
   products: [],
 };
@@ -39,12 +39,11 @@ function switchPanel(name) {
   const btn = document.querySelector(`[data-panel="${name}"]`);
   if (btn) btn.classList.add('active');
 
-  const titles = { chat: 'AI Assistant', products: 'Products', add: 'Add Product', transactions: 'Transactions', settings: 'Settings' };
+  const titles = { chat: 'AI Assistant', products: 'Products', add: 'Add Product', transactions: 'Transactions' };
   document.getElementById('pageTitle').textContent = titles[name] || name;
 
   if (name === 'products') loadProducts();
   if (name === 'transactions') loadTransactions();
-  if (name === 'settings') document.getElementById('apiKeyInput').value = state.apiKey;
 
   // Close mobile sidebar
   document.getElementById('sidebar').classList.remove('open');
@@ -300,12 +299,7 @@ async function sendMessage() {
   const text = input.value.trim();
   if (!text) return;
 
-  const apiKey = state.apiKey || document.getElementById('apiKeyInput')?.value;
-  if (!apiKey) {
-    showToast('Please add your Groq API key in Settings', 'error');
-    switchPanel('settings');
-    return;
-  }
+  // No API key needed from frontend
 
   // Clear welcome screen
   const welcome = document.querySelector('.chat-welcome');
@@ -323,7 +317,7 @@ async function sendMessage() {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: state.chatHistory, api_key: apiKey })
+      body: JSON.stringify({ messages: state.chatHistory })
     });
     const data = await res.json();
     removeTyping(typingId);
@@ -411,20 +405,9 @@ function formatMarkdown(text) {
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
-function saveApiKey() {
-  const key = document.getElementById('apiKeyInput').value.trim();
-  if (!key) { showStatus('apiKeyStatus', 'API key cannot be empty', 'error'); return; }
-  state.apiKey = key;
-  localStorage.setItem('groq_api_key', key);
-  showStatus('apiKeyStatus', '✓ API key saved successfully', 'success');
-}
 
-function toggleApiKey() {
-  const input = document.getElementById('apiKeyInput');
-  const btn = document.getElementById('toggleKey');
-  if (input.type === 'password') { input.type = 'text'; btn.textContent = 'Hide'; }
-  else { input.type = 'password'; btn.textContent = 'Show'; }
-}
+
+
 
 function confirmClearData() {
   if (confirm('This will DELETE ALL products and transactions. Are you sure?')) {

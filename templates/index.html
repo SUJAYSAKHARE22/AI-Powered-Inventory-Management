@@ -69,10 +69,6 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
       <span>Transactions</span>
     </button>
-    <button class="nav-item" data-panel="settings">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/></svg>
-      <span>Settings</span>
-    </button>
   </nav>
 
   <div class="sidebar-footer">
@@ -234,44 +230,7 @@
   </div>
 
   <!-- Settings Panel -->
-  <div class="panel" id="panel-settings">
-    <div class="form-container">
-      <h2 class="form-title">Settings</h2>
-      <div class="settings-section">
-        <h3 class="settings-section-title">🔑 Groq API Key</h3>
-        <p class="settings-desc">Enter your Groq API key to enable AI features. Get one free at <a href="https://console.groq.com" target="_blank">console.groq.com</a></p>
-        <div class="form-group">
-          <label>API Key</label>
-          <div class="api-key-wrap">
-            <input type="password" id="apiKeyInput" placeholder="gsk_...">
-            <button class="btn-ghost" id="toggleKey" onclick="toggleApiKey()">Show</button>
-          </div>
-        </div>
-        <div class="form-actions">
-          <button class="btn-primary" onclick="saveApiKey()">Save API Key</button>
-        </div>
-        <div id="apiKeyStatus" class="status-msg"></div>
-      </div>
-
-      <div class="settings-section">
-        <h3 class="settings-section-title">🗄️ Database</h3>
-        <p class="settings-desc">Manage your inventory database</p>
-        <div class="form-actions">
-          <button class="btn-ghost danger-btn" onclick="confirmClearData()">Reset All Data</button>
-        </div>
-      </div>
-
-      <div class="settings-section">
-        <h3 class="settings-section-title">ℹ️ About</h3>
-        <div class="about-grid">
-          <div class="about-item"><span>Model</span><code>llama-3.1-8b-instant</code></div>
-          <div class="about-item"><span>Provider</span><code>Groq</code></div>
-          <div class="about-item"><span>Framework</span><code>Flask + SQLAlchemy</code></div>
-          <div class="about-item"><span>Version</span><code>1.0.0</code></div>
-        </div>
-      </div>
-    </div>
-  </div>
+  
 </main>
 
 <!-- Stock Update Modal -->
