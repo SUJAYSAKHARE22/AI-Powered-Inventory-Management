@@ -1,23 +1,43 @@
 // ─── State ────────────────────────────────────────────────────────────────────
 const state = {
   chatHistory: [],
-  apiKey: null,
   currentStockAction: 'add',
   products: [],
+  txPage: 1,
+  charts: {},
 };
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  loadMe();
   loadStats();
   loadProducts();
   loadTransactions();
+  loadNotifications();
   setupNav();
   setupChat();
   setupSearch();
   setupStockModal();
-  setupVoice();   // ← voice module init
-  if (state.apiKey) document.getElementById('apiKeyInput').value = state.apiKey;
+  setupVoice();
+  setupImageUpload();
+  setupImportDrop();
 });
+
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+async function loadMe() {
+  try {
+    const res = await fetch('/api/auth/me');
+    if (!res.ok) { window.location.href = '/login'; return; }
+    const d = await res.json();
+    const el = document.getElementById('usernameDisplay');
+    if (el) el.textContent = d.username + ' (' + d.role + ')';
+  } catch (e) { console.error(e); }
+}
+
+async function doLogout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  window.location.href = '/login';
+}
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 function setupNav() {
@@ -40,13 +60,18 @@ function switchPanel(name) {
   const btn = document.querySelector(`[data-panel="${name}"]`);
   if (btn) btn.classList.add('active');
 
-  const titles = { chat: 'AI Assistant', products: 'Products', add: 'Add Product', transactions: 'Transactions' };
+  const titles = {
+    chat: 'AI Assistant', analytics: 'Analytics', products: 'Products',
+    add: 'Add Product', transactions: 'Transactions', import: 'Import / Export',
+    notifications: 'Notifications'
+  };
   document.getElementById('pageTitle').textContent = titles[name] || name;
 
   if (name === 'products') loadProducts();
-  if (name === 'transactions') loadTransactions();
+  if (name === 'transactions') { state.txPage = 1; loadTransactions(); }
+  if (name === 'analytics') loadAnalytics();
+  if (name === 'notifications') loadNotifications();
 
-  // Close mobile sidebar
   document.getElementById('sidebar').classList.remove('open');
 }
 
@@ -59,36 +84,219 @@ async function loadStats() {
     document.getElementById('statValue').textContent = formatCurrency(data.total_value);
     document.getElementById('statLow').textContent = data.low_stock_count;
     document.getElementById('statOut').textContent = data.out_of_stock_count;
-    const alertCount = data.low_stock_count + data.out_of_stock_count;
+
+    // Update KPI row if analytics panel has been initialized
+    const kpiVal = document.getElementById('kpiValue');
+    if (kpiVal) kpiVal.textContent = formatCurrency(data.total_value);
+    const kpiProfit = document.getElementById('kpiProfit');
+    if (kpiProfit) kpiProfit.textContent = formatCurrency(data.estimated_profit);
+
+    const alertCount = data.low_stock_count + data.out_of_stock_count + (data.expiring_soon?.length || 0);
     const el = document.getElementById('alertCount');
     el.textContent = alertCount;
     el.style.display = alertCount > 0 ? 'flex' : 'none';
   } catch (e) { console.error(e); }
 }
 
+// ─── Analytics ────────────────────────────────────────────────────────────────
+async function loadAnalytics() {
+  const days = document.getElementById('analyticsPeriod')?.value || 30;
+  try {
+    const [statsRes, analyticsRes, supplierRes] = await Promise.all([
+      fetch('/api/stats'),
+      fetch(`/api/analytics?days=${days}`),
+      fetch('/api/analytics/supplier'),
+    ]);
+    const stats = await statsRes.json();
+    const analytics = await analyticsRes.json();
+    const supplierData = await supplierRes.json();
+
+    // KPI cards
+    document.getElementById('kpiValue').textContent = formatCurrency(stats.total_value);
+    document.getElementById('kpiProfit').textContent = formatCurrency(stats.estimated_profit);
+    document.getElementById('kpiTurnover').textContent = analytics.turnover_rate + 'x';
+    document.getElementById('kpiDead').textContent = analytics.dead_stock.length;
+
+    // Category chart
+    buildCategoryChart(stats.categories);
+
+    // Status chart
+    buildStatusChart(
+      stats.total_products - stats.low_stock_count - stats.out_of_stock_count,
+      stats.low_stock_count,
+      stats.out_of_stock_count
+    );
+
+    // Predictions
+    renderPredictions(analytics.stock_predictions);
+
+    // Fast movers
+    renderFastMovers(analytics.fast_movers);
+
+    // Dead stock
+    renderDeadStock(analytics.dead_stock);
+
+    // Suppliers
+    renderSuppliers(supplierData.suppliers);
+
+  } catch (e) { console.error(e); }
+}
+
+function buildCategoryChart(categories) {
+  const ctx = document.getElementById('categoryChart');
+  if (!ctx) return;
+  if (state.charts.category) state.charts.category.destroy();
+
+  const labels = Object.keys(categories);
+  const vals = labels.map(k => categories[k].count);
+  const colors = ['#7b5ea7','#4ecdc4','#52e3a8','#ffd166','#ff6b6b','#9b6dff','#45b7d1'];
+
+  state.charts.category = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{ data: vals, backgroundColor: colors.slice(0, labels.length), borderWidth: 0, hoverOffset: 6 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#9a9bb0', font: { size: 12 } } },
+        tooltip: { callbacks: { label: (c) => ` ${c.label}: ${c.raw} products` } }
+      },
+      cutout: '65%',
+    }
+  });
+}
+
+function buildStatusChart(inStock, low, out) {
+  const ctx = document.getElementById('statusChart');
+  if (!ctx) return;
+  if (state.charts.status) state.charts.status.destroy();
+
+  state.charts.status = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: ['In Stock', 'Low Stock', 'Out of Stock'],
+      datasets: [{
+        data: [inStock, low, out],
+        backgroundColor: ['rgba(82,227,168,0.7)', 'rgba(255,209,102,0.7)', 'rgba(255,107,107,0.7)'],
+        borderRadius: 8, borderWidth: 0,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { ticks: { color: '#9a9bb0' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+        y: { ticks: { color: '#9a9bb0' }, grid: { color: 'rgba(255,255,255,0.05)' }, beginAtZero: true }
+      },
+      plugins: { legend: { display: false } }
+    }
+  });
+}
+
+function renderPredictions(predictions) {
+  const el = document.getElementById('predictionList');
+  if (!predictions.length) {
+    el.innerHTML = '<p style="color:var(--text3);font-size:0.85rem">No urgent predictions. Inventory looks healthy!</p>';
+    return;
+  }
+  el.innerHTML = predictions.map(p => {
+    const urgencyColor = p.urgency === 'critical' ? 'var(--red)' : p.urgency === 'soon' ? 'var(--yellow)' : 'var(--cyan)';
+    const urgencyIcon = p.urgency === 'critical' ? '🔴' : p.urgency === 'soon' ? '🟡' : '🟢';
+    return `<div class="intel-item">
+      <div class="intel-item-name">${urgencyIcon} <strong>${esc(p.name)}</strong></div>
+      <div class="intel-item-detail">
+        ${p.days_until_stockout} days of stock left · Reorder in <strong>${p.reorder_in_days}d</strong>
+      </div>
+      <div class="intel-item-sub" style="color:${urgencyColor}">
+        Suggested: <strong>${p.suggested_reorder_qty} units</strong> · Daily usage: ${p.daily_usage}/day
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderFastMovers(movers) {
+  const el = document.getElementById('fastMoverList');
+  if (!movers.length) {
+    el.innerHTML = '<p style="color:var(--text3);font-size:0.85rem">No movement data yet. Add some transactions!</p>';
+    return;
+  }
+  el.innerHTML = movers.map((m, i) => `
+    <div class="intel-item">
+      <div class="intel-item-name"><span style="color:var(--text3)">#${i+1}</span> <strong>${esc(m.name)}</strong></div>
+      <div class="intel-item-detail">${m.units_out} units out · ${m.units_in} units in</div>
+      <div class="intel-item-sub">Current stock: ${m.current_qty}</div>
+    </div>
+  `).join('');
+}
+
+function renderDeadStock(dead) {
+  const el = document.getElementById('deadStockList');
+  if (!dead.length) {
+    el.innerHTML = '<p style="color:var(--text3);font-size:0.85rem">No dead stock detected. Great!</p>';
+    return;
+  }
+  el.innerHTML = dead.map(d => `
+    <div class="intel-item">
+      <div class="intel-item-name">💀 <strong>${esc(d.name)}</strong></div>
+      <div class="intel-item-detail">${d.quantity} units · ${formatCurrency(d.value)} tied up</div>
+      <div class="intel-item-sub" style="color:var(--yellow)">No movement in period — consider markdown or promotion</div>
+    </div>
+  `).join('');
+}
+
+function renderSuppliers(suppliers) {
+  const el = document.getElementById('supplierList');
+  const entries = Object.entries(suppliers);
+  if (!entries.length) {
+    el.innerHTML = '<p style="color:var(--text3);font-size:0.85rem">No supplier data.</p>';
+    return;
+  }
+  el.innerHTML = entries.map(([name, data]) => `
+    <div class="intel-item">
+      <div class="intel-item-name">🏭 <strong>${esc(name)}</strong></div>
+      <div class="intel-item-detail">${data.products} products · ${formatCurrency(data.total_value)} value</div>
+      ${data.low_stock_products > 0
+        ? `<div class="intel-item-sub" style="color:var(--yellow)">${data.low_stock_products} product(s) low — consider reordering</div>`
+        : `<div class="intel-item-sub" style="color:var(--green)">All products adequately stocked</div>`}
+    </div>
+  `).join('');
+}
+
 // ─── Products ─────────────────────────────────────────────────────────────────
 async function loadProducts() {
   try {
-    const res = await fetch('/api/products');
-    state.products = await res.json();
+    const res = await fetch('/api/products?per_page=200');
+    const data = await res.json();
+    state.products = data.products || data;
     renderProductTable(state.products);
     populateCategoryFilter(state.products);
   } catch (e) { console.error(e); }
 }
+
 function renderProductTable(products) {
   const tbody = document.getElementById('productTableBody');
   if (!products.length) {
-    tbody.innerHTML = `<tr><td colspan="8" class="loading-cell">No products found. Ask ARIA to add some!</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" class="loading-cell">No products found. Ask ARIA to add some!</td></tr>`;
     return;
   }
-  tbody.innerHTML = products.map(p => `
+  tbody.innerHTML = products.map(p => {
+    const expiryBadge = p.expiry_status
+      ? `<span class="badge ${p.expiry_status === 'Expired' ? 'out-stock' : p.expiry_status.startsWith('Expiring') ? 'low-stock' : 'in-stock'}">${esc(p.expiry_status)}</span>`
+      : '<span style="color:var(--text3)">—</span>';
+    const img = p.image_filename
+      ? `<img src="/static/uploads/${esc(p.image_filename)}" style="width:32px;height:32px;object-fit:cover;border-radius:6px;margin-right:8px;vertical-align:middle">`
+      : '';
+    return `
     <tr>
-      <td><strong style="color:var(--text)">${esc(p.name)}</strong><br><small style="color:var(--text3)">${esc(p.supplier || '')}</small></td>
+      <td><div style="display:flex;align-items:center">${img}<div><strong style="color:var(--text)">${esc(p.name)}</strong><br><small style="color:var(--text3)">${esc(p.supplier || '')}</small></div></div></td>
       <td><code style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:var(--cyan)">${esc(p.sku)}</code></td>
       <td>${esc(p.category)}</td>
       <td><strong style="color:${p.quantity === 0 ? 'var(--red)' : p.quantity <= p.low_stock_threshold ? 'var(--yellow)' : 'var(--text)'}">${p.quantity}</strong></td>
       <td>${formatCurrency(p.unit_price)}</td>
-      <td style="color:var(--accent2)">${formatCurrency(p.quantity * p.unit_price)}</td>
+      <td style="color:var(--text3)">${formatCurrency(p.cost_price)}</td>
+      <td style="color:var(--accent2)">${formatCurrency(p.total_value)}</td>
+      <td>${expiryBadge}</td>
       <td><span class="badge ${p.status === 'In Stock' ? 'in-stock' : p.status === 'Low Stock' ? 'low-stock' : 'out-stock'}">${p.status}</span></td>
       <td>
         <div class="action-btns">
@@ -99,46 +307,25 @@ function renderProductTable(products) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
           <button class="icon-btn danger" title="Delete" onclick="deleteProduct(${p.id}, '${esc(p.name)}')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6M10 11v6M14 11v6M9 6V4h6v2"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
           </button>
         </div>
       </td>
-    </tr>
-  `).join('');
+    </tr>`;
+  }).join('');
 }
 
 function populateCategoryFilter(products) {
-  const cats = [...new Set(products.map(p => p.category))].sort();
+  const cats = [...new Set(products.map(p => p.category).filter(Boolean))].sort();
   const sel = document.getElementById('categoryFilter');
-  const cur = sel.value;
-  sel.innerHTML = '<option value="">All Categories</option>' +
-    cats.map(c => `<option value="${esc(c)}" ${c === cur ? 'selected' : ''}>${esc(c)}</option>`).join('');
-}
-
-// ─── Add / Edit Product ───────────────────────────────────────────────────────
-function clearForm() {
-  ['fName', 'fSku', 'fCategory', 'fQty', 'fPrice', 'fSupplier', 'fThreshold', 'fDescription'].forEach(id => {
-    document.getElementById(id).value = '';
-  });
-  document.getElementById('editProductId').value = '';
-  document.getElementById('formTitle').textContent = 'Add New Product';
-  document.getElementById('saveProductBtn').textContent = 'Save Product';
+  const current = sel.value;
+  sel.innerHTML = '<option value="">All Categories</option>' + cats.map(c => `<option value="${esc(c)}" ${c===current?'selected':''}>${esc(c)}</option>`).join('');
 }
 
 function editProduct(id) {
   const p = state.products.find(x => x.id === id);
   if (!p) return;
-  document.getElementById('editProductId').value = p.id;
-  document.getElementById('fName').value = p.name;
-  document.getElementById('fSku').value = p.sku;
-  document.getElementById('fCategory').value = p.category;
-  document.getElementById('fQty').value = p.quantity;
-  document.getElementById('fPrice').value = p.unit_price;
-  document.getElementById('fSupplier').value = p.supplier;
-  document.getElementById('fThreshold').value = p.low_stock_threshold;
-  document.getElementById('fDescription').value = p.description;
-  document.getElementById('formTitle').textContent = `Edit: ${p.name}`;
-  document.getElementById('saveProductBtn').textContent = 'Update Product';
+  populateEditForm(p);
   switchPanel('add');
 }
 
@@ -150,21 +337,34 @@ async function saveProduct() {
     category: document.getElementById('fCategory').value.trim() || 'General',
     quantity: parseInt(document.getElementById('fQty').value) || 0,
     unit_price: parseFloat(document.getElementById('fPrice').value) || 0,
+    cost_price: parseFloat(document.getElementById('fCostPrice').value) || 0,
     supplier: document.getElementById('fSupplier').value.trim(),
+    supplier_lead_days: parseInt(document.getElementById('fLeadDays').value) || 7,
     low_stock_threshold: parseInt(document.getElementById('fThreshold').value) || 10,
+    expiry_date: document.getElementById('fExpiry').value || null,
     description: document.getElementById('fDescription').value.trim(),
   };
+
   if (!data.name || !data.sku) { showToast('Name and SKU are required', 'error'); return; }
+
   try {
     const url = editId ? `/api/products/${editId}` : '/api/products';
     const method = editId ? 'PUT' : 'POST';
     const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
     const result = await res.json();
     if (!res.ok) { showToast(result.error || 'Failed to save product', 'error'); return; }
+
+    // Upload image if selected
+    const imageFile = document.getElementById('imageFileInput').files[0];
+    if (imageFile) {
+      const fd = new FormData();
+      fd.append('image', imageFile);
+      await fetch(`/api/products/${result.id}/image`, { method: 'POST', body: fd });
+    }
+
     showToast(editId ? `Updated: ${result.name}` : `Added: ${result.name}`, 'success');
     clearForm();
-    loadStats();
-    loadProducts();
+    loadStats(); loadProducts();
   } catch (e) { showToast('Error saving product', 'error'); }
 }
 
@@ -176,6 +376,60 @@ async function deleteProduct(id, name) {
     showToast(result.message || 'Deleted', 'success');
     loadStats(); loadProducts();
   } catch (e) { showToast('Error deleting product', 'error'); }
+}
+
+function clearForm() {
+  document.getElementById('editProductId').value = '';
+  ['fName','fSku','fCategory','fSupplier','fDescription'].forEach(id => document.getElementById(id).value = '');
+  ['fQty','fPrice','fCostPrice','fLeadDays','fThreshold'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('fExpiry').value = '';
+  document.getElementById('formTitle').textContent = 'Add New Product';
+  document.getElementById('saveProductBtn').textContent = 'Save Product';
+  document.getElementById('productImagePreview').style.display = 'none';
+  document.getElementById('imageUploadPrompt').style.display = 'flex';
+  document.getElementById('imageFileInput').value = '';
+}
+
+function populateEditForm(p) {
+  document.getElementById('editProductId').value = p.id;
+  document.getElementById('fName').value = p.name || '';
+  document.getElementById('fSku').value = p.sku || '';
+  document.getElementById('fCategory').value = p.category || '';
+  document.getElementById('fQty').value = p.quantity ?? 0;
+  document.getElementById('fPrice').value = p.unit_price ?? 0;
+  document.getElementById('fCostPrice').value = p.cost_price ?? 0;
+  document.getElementById('fSupplier').value = p.supplier || '';
+  document.getElementById('fLeadDays').value = p.supplier_lead_days ?? 7;
+  document.getElementById('fThreshold').value = p.low_stock_threshold ?? 10;
+  document.getElementById('fExpiry').value = p.expiry_date ? p.expiry_date.split('T')[0] : '';
+  document.getElementById('fDescription').value = p.description || '';
+  document.getElementById('formTitle').textContent = `Edit: ${p.name}`;
+  document.getElementById('saveProductBtn').textContent = 'Update Product';
+  if (p.image_filename) {
+    document.getElementById('productImagePreview').src = `/static/uploads/${p.image_filename}`;
+    document.getElementById('productImagePreview').style.display = 'block';
+    document.getElementById('imageUploadPrompt').style.display = 'none';
+  }
+}
+
+// ─── Image Upload ─────────────────────────────────────────────────────────────
+function setupImageUpload() {
+  const zone = document.getElementById('imageUploadZone');
+  const input = document.getElementById('imageFileInput');
+  if (!zone) return;
+
+  zone.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => {
+    const file = input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      document.getElementById('productImagePreview').src = e.target.result;
+      document.getElementById('productImagePreview').style.display = 'block';
+      document.getElementById('imageUploadPrompt').style.display = 'none';
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 // ─── Stock Modal ──────────────────────────────────────────────────────────────
@@ -219,27 +473,125 @@ async function submitStockUpdate() {
     if (!res.ok) { showToast(result.error || 'Stock update failed', 'error'); return; }
     showToast(`Stock updated: ${result.old_quantity} → ${result.new_quantity}`, 'success');
     closeModal('stockModal');
-    loadStats(); loadProducts();
+    loadStats(); loadProducts(); loadNotifications();
   } catch (e) { showToast('Error updating stock', 'error'); }
 }
 
 // ─── Transactions ─────────────────────────────────────────────────────────────
 async function loadTransactions() {
   try {
-    const res = await fetch('/api/transactions?limit=100');
-    const txs = await res.json();
+    const txType = document.getElementById('txTypeFilter')?.value || '';
+    const fromDate = document.getElementById('txFromDate')?.value || '';
+    const toDate = document.getElementById('txToDate')?.value || '';
+    let url = `/api/transactions?page=${state.txPage}&per_page=50`;
+    if (txType) url += `&type=${txType}`;
+    if (fromDate) url += `&from=${fromDate}`;
+    if (toDate) url += `&to=${toDate}T23:59:59`;
+
+    const res = await fetch(url);
+    const data = await res.json();
+    const txs = data.transactions || data;
     const tbody = document.getElementById('transactionTableBody');
-    if (!txs.length) { tbody.innerHTML = `<tr><td colspan="5" class="loading-cell">No transactions yet</td></tr>`; return; }
+
+    if (!txs.length) {
+      tbody.innerHTML = `<tr><td colspan="7" class="loading-cell">No transactions found</td></tr>`;
+      return;
+    }
     tbody.innerHTML = txs.map(t => `
       <tr>
         <td style="white-space:nowrap">${formatDate(t.created_at)}</td>
         <td>${esc(t.product_name)}</td>
+        <td><code style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:var(--cyan)">${esc(t.product_sku||'')}</code></td>
         <td><span class="badge ${t.transaction_type}">${t.transaction_type}</span></td>
         <td><strong>${t.quantity}</strong></td>
+        <td style="color:var(--text3)">${esc(t.created_by||'system')}</td>
         <td style="color:var(--text3)">${esc(t.note || '—')}</td>
       </tr>
     `).join('');
+
+    // Pagination
+    if (data.pages > 1) {
+      document.getElementById('txPagination').innerHTML = `
+        <button class="btn-ghost" onclick="txChangePage(${state.txPage - 1})" ${state.txPage <= 1 ? 'disabled' : ''}>← Prev</button>
+        <span style="color:var(--text2)">Page ${state.txPage} / ${data.pages}</span>
+        <button class="btn-ghost" onclick="txChangePage(${state.txPage + 1})" ${state.txPage >= data.pages ? 'disabled' : ''}>Next →</button>
+      `;
+    }
   } catch (e) { console.error(e); }
+}
+
+function txChangePage(page) {
+  state.txPage = page;
+  loadTransactions();
+}
+
+function exportTxCSV() {
+  const txType = document.getElementById('txTypeFilter')?.value || '';
+  let url = '/api/transactions?per_page=10000';
+  if (txType) url += `&type=${txType}`;
+  window.open(url, '_blank');
+}
+
+// ─── Import / Export ──────────────────────────────────────────────────────────
+function exportCSV() {
+  window.open('/api/products/export/csv', '_blank');
+}
+
+async function importCSV(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const resultEl = document.getElementById('importResult');
+  resultEl.style.display = 'block';
+  resultEl.innerHTML = '<p style="color:var(--text2)">Importing…</p>';
+
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await fetch('/api/products/import/csv', { method: 'POST', body: fd });
+    const data = await res.json();
+    const errorHtml = data.errors.length
+      ? `<ul style="color:var(--red);font-size:0.82rem;margin-top:8px">${data.errors.slice(0,5).map(e => `<li>${esc(e)}</li>`).join('')}</ul>`
+      : '';
+    resultEl.innerHTML = `
+      <div style="background:rgba(82,227,168,0.1);border:1px solid rgba(82,227,168,0.3);border-radius:10px;padding:12px;color:var(--green)">
+        ✅ Imported <strong>${data.added}</strong> products · Skipped <strong>${data.skipped}</strong> duplicates
+        ${errorHtml}
+      </div>`;
+    if (data.added > 0) { loadStats(); loadProducts(); }
+  } catch (e) {
+    resultEl.innerHTML = `<div style="color:var(--red)">Import failed: ${e.message}</div>`;
+  }
+  input.value = '';
+}
+
+function downloadTemplate() {
+  const csv = 'Name,SKU,Category,Quantity,Unit Price,Cost Price,Supplier,Lead Days,Low Stock Threshold,Description,Expiry Date\nSample Product,SKU-001,Electronics,100,29.99,15.00,Supplier Name,7,10,Product description,2025-12-31\n';
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'aria_import_template.csv';
+  a.click();
+}
+
+function setupImportDrop() {
+  const zone = document.getElementById('importDropZone');
+  if (!zone) return;
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file && file.name.endsWith('.csv')) {
+      const input = document.getElementById('csvFileInput');
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      input.files = dt.files;
+      importCSV(input);
+    } else {
+      showToast('Please drop a CSV file', 'error');
+    }
+  });
 }
 
 // ─── Search ───────────────────────────────────────────────────────────────────
@@ -249,27 +601,56 @@ function setupSearch() {
     const q = globalSearch.value.trim();
     if (!q) { renderProductTable(state.products); return; }
     const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-    const results = await res.json();
-    renderProductTable(results);
-    if (document.getElementById('panel-products').classList.contains('active')) return;
-    switchPanel('products');
+    const data = await res.json();
+    renderProductTable(data.products || data);
+    if (!document.getElementById('panel-products').classList.contains('active')) switchPanel('products');
   }, 300));
 
-  document.getElementById('productSearch').addEventListener('input', debounce(async () => {
-    const q = document.getElementById('productSearch').value.trim();
-    const cat = document.getElementById('categoryFilter').value;
-    const url = `/api/search?q=${encodeURIComponent(q)}&category=${encodeURIComponent(cat)}`;
-    const res = await fetch(url);
-    renderProductTable(await res.json());
-  }, 300));
+  document.getElementById('productSearch')?.addEventListener('input', debounce(doProductFilter, 300));
+  document.getElementById('categoryFilter')?.addEventListener('change', doProductFilter);
+  document.getElementById('statusFilter')?.addEventListener('change', doProductFilter);
+}
 
-  document.getElementById('categoryFilter').addEventListener('change', async () => {
-    const q = document.getElementById('productSearch').value.trim();
-    const cat = document.getElementById('categoryFilter').value;
-    const url = `/api/search?q=${encodeURIComponent(q)}&category=${encodeURIComponent(cat)}`;
-    const res = await fetch(url);
-    renderProductTable(await res.json());
-  });
+async function doProductFilter() {
+  const q = document.getElementById('productSearch').value.trim();
+  const cat = document.getElementById('categoryFilter').value;
+  const status = document.getElementById('statusFilter').value;
+  const url = `/api/search?q=${encodeURIComponent(q)}&category=${encodeURIComponent(cat)}&status=${encodeURIComponent(status)}`;
+  const res = await fetch(url);
+  const data = await res.json();
+  renderProductTable(data.products || data);
+}
+
+// ─── Notifications ────────────────────────────────────────────────────────────
+async function loadNotifications() {
+  try {
+    const res = await fetch('/api/notifications');
+    const notifs = await res.json();
+    const el = document.getElementById('notificationList');
+    if (!el) return;
+    if (!notifs.length) {
+      el.innerHTML = '<p style="color:var(--text3);padding:20px">No unread notifications. All clear! 🎉</p>';
+      return;
+    }
+    el.innerHTML = notifs.map(n => `
+      <div class="notif-item notif-${n.type}" onclick="markNotifRead(${n.id}, this)">
+        <div class="notif-msg">${esc(n.message)}</div>
+        <div class="notif-time">${formatDate(n.created_at)}</div>
+      </div>
+    `).join('');
+  } catch (e) { console.error(e); }
+}
+
+async function markNotifRead(id, el) {
+  await fetch(`/api/notifications/${id}/read`, { method: 'POST' });
+  el.classList.add('read');
+  setTimeout(() => el.remove(), 400);
+}
+
+async function markAllRead() {
+  await fetch('/api/notifications/read-all', { method: 'POST' });
+  loadNotifications();
+  document.getElementById('alertCount').style.display = 'none';
 }
 
 // ─── Chat ─────────────────────────────────────────────────────────────────────
@@ -278,10 +659,7 @@ function setupChat() {
   const sendBtn = document.getElementById('sendBtn');
 
   function updateSendBtn() {
-    // Only show send btn if not in voice mode and there's text
-    if (!voice.active) {
-      sendBtn.style.display = input.value.trim() ? '' : 'none';
-    }
+    if (!voice.active) sendBtn.style.display = input.value.trim() ? '' : 'none';
   }
 
   input.addEventListener('keydown', e => {
@@ -308,7 +686,6 @@ async function sendMessage(opts = {}) {
   const text = opts.text || input.value.trim();
   if (!text) return;
 
-  // Clear welcome screen
   const welcome = document.querySelector('.chat-welcome');
   if (welcome) welcome.remove();
 
@@ -316,7 +693,6 @@ async function sendMessage(opts = {}) {
   state.chatHistory.push({ role: 'user', content: text });
   input.value = '';
   input.style.height = 'auto';
-  // hide send btn since input is now empty
   document.getElementById('sendBtn').style.display = 'none';
 
   const typingId = appendTyping();
@@ -335,13 +711,10 @@ async function sendMessage(opts = {}) {
 
     state.chatHistory.push({ role: 'assistant', content: data.message });
     appendMessage('ai', data.message, data.actions_taken);
-
-    // Voice hook: speaks reply if user sent this message via voice
     voice.speakIfActive(data.message);
 
     if (data.actions_taken?.length) {
-      await Promise.all([loadStats(), loadProducts(), loadTransactions()]);
-      // Sync the Add/Edit Product form for any successful CRUD action
+      await Promise.all([loadStats(), loadProducts(), loadTransactions(), loadNotifications()]);
       syncFormFromActions(data.actions_taken);
     }
   } catch (e) {
@@ -352,57 +725,25 @@ async function sendMessage(opts = {}) {
   }
 }
 
-/**
- * After AI executes a CRUD action, populate the Add Product form
- * so the Products section always reflects the latest state.
- * Call this AFTER await loadProducts() so state.products is fresh.
- */
 function syncFormFromActions(actions) {
   for (const a of actions) {
     if (a.status !== 'success') continue;
-
     if (a.action === 'create_product' && a.product) {
-      // After loadProducts() the product is now in state.products — populate form
       const fresh = state.products.find(x => x.id === a.product.id) || a.product;
       populateEditForm(fresh);
-
     } else if (a.action === 'update_product' && a.product) {
-      // Always refresh the form with updated data
       const fresh = state.products.find(x => x.id === a.product.id) || a.product;
       populateEditForm(fresh);
-
     } else if (a.action === 'delete_product') {
-      // Clear the form — product no longer exists
       clearForm();
-
     } else if (a.action === 'update_stock') {
-      // Find the product in the freshly loaded list by matching the form's current edit id
-      // or by product_id in the action
-      const targetId = a.product_id || parseInt(document.getElementById('editProductId').value);
+      const targetId = a.product_id;
       if (targetId) {
         const fresh = state.products.find(x => x.id === targetId);
         if (fresh) populateEditForm(fresh);
       }
     }
   }
-}
-
-/**
- * Populate the Add Product form in edit mode with a product object.
- * Mirrors editProduct() but works from a product dict directly.
- */
-function populateEditForm(p) {
-  document.getElementById('editProductId').value  = p.id;
-  document.getElementById('fName').value          = p.name || '';
-  document.getElementById('fSku').value           = p.sku  || '';
-  document.getElementById('fCategory').value      = p.category || '';
-  document.getElementById('fQty').value           = p.quantity ?? 0;
-  document.getElementById('fPrice').value         = p.unit_price ?? 0;
-  document.getElementById('fSupplier').value      = p.supplier || '';
-  document.getElementById('fThreshold').value     = p.low_stock_threshold ?? 10;
-  document.getElementById('fDescription').value   = p.description || '';
-  document.getElementById('formTitle').textContent       = `Edit: ${p.name}`;
-  document.getElementById('saveProductBtn').textContent  = 'Update Product';
 }
 
 function appendMessage(role, text, actions = []) {
@@ -414,18 +755,14 @@ function appendMessage(role, text, actions = []) {
     ? '<div class="msg-avatar">You</div>'
     : '<div class="msg-avatar">AI</div>';
 
-  // Clean action JSON blocks from display text
   const cleanText = text.replace(/```json[\s\S]*?```/g, '').trim();
   const formattedText = formatMarkdown(cleanText);
 
-  // Build action badges + product cards
   let actionBadges = '';
   if (actions?.length) {
     actionBadges = actions.map(a => {
       if (a.status === 'success') {
-        let label = '';
-        let productCard = '';
-
+        let label = '', productCard = '';
         if (a.action === 'create_product' && a.product) {
           label = `✓ Created: ${a.product.name}`;
           productCard = buildProductCard(a.product, 'created');
@@ -439,7 +776,6 @@ function appendMessage(role, text, actions = []) {
         } else {
           label = `✓ ${a.action}`;
         }
-
         return `<span class="action-badge">${label}</span>${productCard}`;
       } else {
         return `<span class="action-badge error">✗ ${a.message || a.action}</span>`;
@@ -453,12 +789,11 @@ function appendMessage(role, text, actions = []) {
   container.scrollTop = container.scrollHeight;
 }
 
-/**
- * Build a compact product detail card shown inline in the chat after CRUD.
- */
 function buildProductCard(p, mode) {
   const statusClass = p.status === 'In Stock' ? 'in-stock' : p.status === 'Low Stock' ? 'low-stock' : 'out-stock';
-  const modeLabel   = mode === 'created' ? '🆕 New Product' : '✏️ Updated Product';
+  const modeLabel = mode === 'created' ? '🆕 New Product' : '✏️ Updated Product';
+  const profitMargin = p.unit_price > 0 && p.cost_price > 0
+    ? ` · Margin: ${(((p.unit_price - p.cost_price) / p.unit_price) * 100).toFixed(0)}%` : '';
   return `
     <div class="product-inline-card">
       <div class="pic-header">
@@ -470,7 +805,7 @@ function buildProductCard(p, mode) {
         <div class="pic-row"><span class="pic-label">SKU</span><code class="pic-code">${esc(p.sku)}</code></div>
         <div class="pic-row"><span class="pic-label">Category</span><span class="pic-val">${esc(p.category)}</span></div>
         <div class="pic-row"><span class="pic-label">Quantity</span><span class="pic-val">${p.quantity}</span></div>
-        <div class="pic-row"><span class="pic-label">Price</span><span class="pic-val">${formatCurrency(p.unit_price)}</span></div>
+        <div class="pic-row"><span class="pic-label">Price</span><span class="pic-val">${formatCurrency(p.unit_price)}${profitMargin}</span></div>
         ${p.supplier ? `<div class="pic-row"><span class="pic-label">Supplier</span><span class="pic-val">${esc(p.supplier)}</span></div>` : ''}
       </div>
       <button class="pic-edit-btn" onclick="editProduct(${p.id});switchPanel('add')">✏️ Edit in Form</button>
@@ -502,23 +837,9 @@ function formatMarkdown(text) {
     .replace(/^## (.+)$/gm, '<h3 style="color:#fff;margin:14px 0 8px;font-family:Syne,sans-serif">$1</h3>')
     .replace(/^- (.+)$/gm, '<li>$1</li>')
     .replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>')
-    .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+    .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
     .replace(/\n\n/g, '</p><p>')
     .replace(/\n/g, '<br>');
-}
-
-// ─── Settings ─────────────────────────────────────────────────────────────────
-
-function confirmClearData() {
-  if (confirm('This will DELETE ALL products and transactions. Are you sure?')) {
-    showToast('Reset not implemented in demo mode', 'error');
-  }
-}
-
-function showStatus(elId, msg, type) {
-  const el = document.getElementById(elId);
-  el.textContent = msg;
-  el.className = `status-msg ${type}`;
 }
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -547,52 +868,30 @@ function debounce(fn, ms) {
   let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
 }
 
-
-
-
-
 // ══════════════════════════════════════════════════════════════════════════════
-// ─── VOICE MODULE (Auto-cycle conversation — ChatGPT/Gemini style) ────────────
+// ─── VOICE MODULE (unchanged — full original preserved) ───────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
-//
-//  NEW FLOW:
-//    1. User clicks inline 🎙️ button → dialog opens, session starts
-//    2. ARIA auto-starts listening via MediaRecorder + Web Audio silence detection
-//    3. When user stops speaking for ~2.5s → recording stops automatically
-//    4. Audio → POST /api/voice/transcribe  (Groq Whisper STT)
-//    5. Text shown on screen → POST /api/voice/chat  (concise AI reply)
-//    6. AI reply shown + spoken via Groq TTS / browser TTS
-//    7. After speaking → auto-starts listening again (loop continues)
-//    8. User clicks "Stop Conversation" button → session ends cleanly
-//
-//  The inline button ONLY starts/ends the session — no per-message clicks needed.
-//
-// ─────────────────────────────────────────────────────────────────────────────
 
 const voice = {
-  active: false,           // true = session is running (auto-cycle loop active)
+  active: false,
   mediaRecorder: null,
   chunks: [],
   currentAudio: null,
-  history: [],             // voice-specific chat history
+  history: [],
   isOpen: false,
-  isBusy: false,           // true while processing (transcribe/think/speak)
-  // Web Audio silence detection
+  isBusy: false,
   audioCtx: null,
   analyser: null,
   silenceTimer: null,
   stream: null,
-  SILENCE_THRESHOLD: 10,   // RMS below this = silence (0–255 scale)
-  SILENCE_DELAY_MS: 2500,  // ms of silence before auto-stop
+  SILENCE_THRESHOLD: 10,
+  SILENCE_DELAY_MS: 2500,
 };
 
-// Stub so sendMessage() won't break
 voice.speakIfActive = function() {};
 
-// ─── Dialog open / close ──────────────────────────────────────────────────────
 function openVoiceDialog() {
   voice.isOpen = true;
-  // Show inline voice bar, hide send btn, show stop btn
   const bar = document.getElementById('voiceInlineBar');
   const stopBtn = document.getElementById('voiceStopInlineBtn');
   const sendBtn = document.getElementById('sendBtn');
@@ -600,10 +899,7 @@ function openVoiceDialog() {
   if (stopBtn) stopBtn.style.display = '';
   if (sendBtn) sendBtn.style.display = 'none';
   setVoiceDialogState('idle');
-  // Switch to chat panel so messages are visible
-  if (!document.getElementById('panel-chat').classList.contains('active')) {
-    switchPanel('chat');
-  }
+  if (!document.getElementById('panel-chat').classList.contains('active')) switchPanel('chat');
 }
 
 function closeVoiceDialog() {
@@ -616,29 +912,24 @@ function closeVoiceDialog() {
   _syncInlineBtn('idle');
 }
 
-// ─── Session start / stop ─────────────────────────────────────────────────────
 function startVoiceSession() {
   if (voice.active) return;
   voice.active = true;
   _syncInlineBtn('active');
   _setStopBtn(true);
-  // Kick off the first listen cycle
   _voiceListen();
 }
 
 function stopVoiceSession() {
-  voice.active  = false;
-  voice.isBusy  = false;
-  // Stop silence detection
+  voice.active = false;
+  voice.isBusy = false;
   _clearSilenceDetection();
-  // Stop recorder
   if (voice.mediaRecorder) {
     try { voice.mediaRecorder.stop(); } catch {}
     voice.stream?.getTracks().forEach(t => t.stop());
     voice.mediaRecorder = null;
     voice.stream = null;
   }
-  // Stop audio
   if (voice.currentAudio) { voice.currentAudio.pause(); voice.currentAudio = null; }
   window.speechSynthesis?.cancel();
   _syncInlineBtn('idle');
@@ -646,13 +937,10 @@ function stopVoiceSession() {
   setVoiceDialogState('idle');
 }
 
-// ─── Core listen cycle ────────────────────────────────────────────────────────
 async function _voiceListen() {
   if (!voice.active) return;
-
   setVoiceDialogState('listening');
   voice.chunks = [];
-
   try {
     voice.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const mimeType = getSupportedMime();
@@ -660,59 +948,41 @@ async function _voiceListen() {
     voice.mediaRecorder.ondataavailable = e => { if (e.data.size > 0) voice.chunks.push(e.data); };
     voice.mediaRecorder.onstop = _onListenDone;
     voice.mediaRecorder.start();
-
-    // Start silence detection using Web Audio API
     _startSilenceDetection(voice.stream);
-
   } catch {
     showToast('Microphone access denied', 'error');
     stopVoiceSession();
   }
 }
 
-// ─── Silence detection via Web Audio ─────────────────────────────────────────
 function _startSilenceDetection(stream) {
   try {
-    voice.audioCtx  = new (window.AudioContext || window.webkitAudioContext)();
-    voice.analyser  = voice.audioCtx.createAnalyser();
+    voice.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    voice.analyser = voice.audioCtx.createAnalyser();
     voice.analyser.fftSize = 512;
     const source = voice.audioCtx.createMediaStreamSource(stream);
     source.connect(voice.analyser);
-
     const buf = new Uint8Array(voice.analyser.fftSize);
     let silenceStart = null;
-    let hasSpeech    = false;   // must detect speech before triggering silence-stop
-
+    let hasSpeech = false;
     const check = () => {
       if (!voice.mediaRecorder || voice.mediaRecorder.state !== 'recording') return;
-
       voice.analyser.getByteTimeDomainData(buf);
-      // RMS energy
       let sum = 0;
-      for (let i = 0; i < buf.length; i++) {
-        const v = (buf[i] - 128) / 128;
-        sum += v * v;
-      }
+      for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
       const rms = Math.sqrt(sum / buf.length) * 255;
-
       if (rms > voice.SILENCE_THRESHOLD) {
-        hasSpeech    = true;
-        silenceStart = null;
+        hasSpeech = true; silenceStart = null;
       } else if (hasSpeech) {
-        // Speech detected before — now counting silence
         if (!silenceStart) silenceStart = Date.now();
         if (Date.now() - silenceStart >= voice.SILENCE_DELAY_MS) {
-          // Auto-stop recording
-          _clearSilenceDetection();
-          _stopRecording();
-          return;
+          _clearSilenceDetection(); _stopRecording(); return;
         }
       }
       voice.silenceTimer = requestAnimationFrame(check);
     };
     voice.silenceTimer = requestAnimationFrame(check);
   } catch {
-    // Web Audio not available — fall back to a fixed 8s max recording
     voice.silenceTimer = setTimeout(() => _stopRecording(), 8000);
   }
 }
@@ -732,181 +1002,107 @@ function _clearSilenceDetection() {
 
 function _stopRecording() {
   if (!voice.mediaRecorder) return;
-  if (voice.mediaRecorder.state === 'recording') {
-    voice.mediaRecorder.stop();
-  }
+  if (voice.mediaRecorder.state === 'recording') voice.mediaRecorder.stop();
   voice.stream?.getTracks().forEach(t => t.stop());
   voice.mediaRecorder = null;
   voice.stream = null;
   setVoiceDialogState('transcribing');
 }
 
-// ─── After recording stops ────────────────────────────────────────────────────
 async function _onListenDone() {
-  if (!voice.active) return;  // Session was stopped mid-flight
-
+  if (!voice.active) return;
   voice.isBusy = true;
   const mimeType = getSupportedMime();
   const blob = new Blob(voice.chunks, { type: mimeType || 'audio/webm' });
   voice.chunks = [];
-
-  if (blob.size < 1000) {
-    // Too short / silence only — restart listening
-    voice.isBusy = false;
-    if (voice.active) _voiceListen();
-    return;
-  }
-
+  if (blob.size < 1000) { voice.isBusy = false; if (voice.active) _voiceListen(); return; }
   try {
-    // ── Step 1: Transcribe ────────────────────────────────────────────────────
     const ext = mimeType.includes('ogg') ? 'ogg' : mimeType.includes('mp4') ? 'mp4' : 'webm';
-    const fd  = new FormData();
+    const fd = new FormData();
     fd.append('audio', blob, `voice.${ext}`);
-
-    const res  = await fetch('/api/voice/transcribe', { method: 'POST', body: fd });
+    const res = await fetch('/api/voice/transcribe', { method: 'POST', body: fd });
     const data = await res.json();
-
     if (!res.ok || data.error || !data.text?.trim()) {
-      // Transcription failed or empty — silently restart listening
-      voice.isBusy = false;
-      if (voice.active) _voiceListen();
-      return;
+      voice.isBusy = false; if (voice.active) _voiceListen(); return;
     }
-
     const text = data.text.trim();
     appendVoiceTranscript('user', text);
-
-    // ── Step 2: AI response ───────────────────────────────────────────────────
     setVoiceDialogState('thinking');
     voice.history.push({ role: 'user', content: text });
-
-    const aiRes  = await fetch('/api/voice/chat', {
+    const aiRes = await fetch('/api/voice/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages: voice.history })
     });
     const aiData = await aiRes.json();
-
     if (!aiRes.ok || aiData.error) {
-      voice.isBusy = false;
-      showToast('AI error: ' + (aiData.error || 'unknown'), 'error');
-      if (voice.active) _voiceListen();
-      return;
+      voice.isBusy = false; showToast('AI error: ' + (aiData.error || 'unknown'), 'error');
+      if (voice.active) _voiceListen(); return;
     }
-
     const reply = aiData.message || '';
     voice.history.push({ role: 'assistant', content: reply });
     appendVoiceTranscript('aria', reply);
-
-    // Mirror to main chat
     appendMessage('user', text);
     state.chatHistory.push({ role: 'user', content: text });
     appendMessage('ai', reply, aiData.actions_taken);
     state.chatHistory.push({ role: 'assistant', content: reply });
-
     if (aiData.actions_taken?.length) {
-      await Promise.all([loadStats(), loadProducts(), loadTransactions()]);
-      // Sync the Add/Edit Product form for any successful voice CRUD action
+      await Promise.all([loadStats(), loadProducts(), loadTransactions(), loadNotifications()]);
       syncFormFromActions(aiData.actions_taken);
     }
-
-    // ── Step 3: Speak, then loop back to listen ───────────────────────────────
     await speakVoiceReply(reply);
-
   } catch (err) {
-    voice.isBusy = false;
-    showToast('Voice error: ' + err.message, 'error');
+    voice.isBusy = false; showToast('Voice error: ' + err.message, 'error');
     if (voice.active) _voiceListen();
   }
 }
 
-// ─── TTS — after speaking, auto-restart listening ────────────────────────────
 async function speakVoiceReply(text) {
   setVoiceDialogState('speaking');
-  const cleanText = text
-    .replace(/```[\s\S]*?```/g, '')
-    .replace(/\*\*(.*?)\*\*/g, '$1')
-    .replace(/\*(.*?)\*/g, '$1')
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/#{1,4}\s+/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 800);
-
+  const cleanText = text.replace(/```[\s\S]*?```/g, '').replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1').replace(/`([^`]+)`/g, '$1').replace(/#{1,4}\s+/g, '').replace(/\s+/g, ' ').trim().slice(0, 800);
   const onDone = () => {
     voice.isBusy = false;
-    // Auto-restart listening for next question
-    if (voice.active) {
-      _voiceListen();
-    } else {
-      setVoiceDialogState('idle');
-    }
+    if (voice.active) _voiceListen(); else setVoiceDialogState('idle');
   };
-
   try {
     const res = await fetch('/api/voice/speak', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: cleanText })
     });
-
     const contentType = res.headers.get('Content-Type') || '';
-    if (!res.ok || contentType.includes('application/json')) {
-      await res.json().catch(() => ({}));
-      browserTTS(cleanText, onDone);
-      return;
-    }
-
-    const blob  = await res.blob();
-    const url   = URL.createObjectURL(blob);
+    if (!res.ok || contentType.includes('application/json')) { await res.json().catch(() => {}); browserTTS(cleanText, onDone); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
     voice.currentAudio = audio;
-
-    audio.onended = () => {
-      URL.revokeObjectURL(url);
-      voice.currentAudio = null;
-      onDone();
-    };
-    audio.onerror = () => {
-      URL.revokeObjectURL(url);
-      voice.currentAudio = null;
-      browserTTS(cleanText, onDone);
-    };
+    audio.onended = () => { URL.revokeObjectURL(url); voice.currentAudio = null; onDone(); };
+    audio.onerror = () => { URL.revokeObjectURL(url); voice.currentAudio = null; browserTTS(cleanText, onDone); };
     audio.play().catch(() => browserTTS(cleanText, onDone));
-  } catch {
-    browserTTS(cleanText, onDone);
-  }
+  } catch { browserTTS(cleanText, onDone); }
 }
 
 function browserTTS(text, onDone) {
   if (!window.speechSynthesis) { onDone?.(); return; }
   window.speechSynthesis.cancel();
-  const utt   = new SpeechSynthesisUtterance(text.slice(0, 500));
-  utt.rate    = 1.0;
-  utt.pitch   = 1.05;
-  utt.lang    = 'en-US';
+  const utt = new SpeechSynthesisUtterance(text.slice(0, 500));
+  utt.rate = 1.0; utt.pitch = 1.05; utt.lang = 'en-US';
   const voices = window.speechSynthesis.getVoices();
   const female = voices.find(v => /female|woman|zira|samantha|karen|victoria/i.test(v.name));
   if (female) utt.voice = female;
-  utt.onend   = () => onDone?.();
-  utt.onerror = () => onDone?.();
+  utt.onend = () => onDone?.(); utt.onerror = () => onDone?.();
   window.speechSynthesis.speak(utt);
 }
 
-// ─── State labels ─────────────────────────────────────────────────────────────
-function setVoiceDialogState(state) {
-  // Legacy overlay elements (hidden but kept for compat)
-  const avatar   = document.getElementById('voiceAvatar');
-  const label    = document.getElementById('voiceStateLabel');
+function setVoiceDialogState(st) {
+  const avatar = document.getElementById('voiceAvatar');
+  const label = document.getElementById('voiceStateLabel');
   const waveform = document.getElementById('voiceWaveform');
-  if (avatar)   avatar.className   = 'voice-avatar';
+  if (avatar) avatar.className = 'voice-avatar';
   if (waveform) waveform.className = 'voice-waveform';
-
-  // Inline bar elements
   const inlineAvatar = document.getElementById('voiceInlineAvatar');
-  const inlineLabel  = document.getElementById('voiceInlineLabel');
-  const inlineWave   = document.getElementById('voiceInlineWave');
-
+  const inlineLabel = document.getElementById('voiceInlineLabel');
+  const inlineWave = document.getElementById('voiceInlineWave');
   const states = {
     idle:         { label: 'Click 🎙️ to start conversation', avatarClass: '',           waveClass: '' },
     listening:    { label: '🎙️ Listening…',                  avatarClass: 'recording',  waveClass: 'active recording' },
@@ -914,30 +1110,19 @@ function setVoiceDialogState(state) {
     thinking:     { label: '💭 ARIA is thinking…',            avatarClass: 'thinking',   waveClass: 'active thinking' },
     speaking:     { label: '🔊 ARIA is speaking…',            avatarClass: 'speaking',   waveClass: 'active speaking' },
   };
-  const s = states[state] || states.idle;
-
+  const s = states[st] || states.idle;
   if (label) label.textContent = s.label;
   if (s.avatarClass && avatar) avatar.classList.add(s.avatarClass);
   if (s.waveClass && waveform) s.waveClass.split(' ').forEach(c => waveform.classList.add(c));
-
-  // Drive inline bar
   if (inlineLabel) inlineLabel.textContent = s.label;
-  if (inlineAvatar) {
-    inlineAvatar.className = 'voice-inline-avatar';
-    if (s.avatarClass) inlineAvatar.classList.add(s.avatarClass);
-  }
-  if (inlineWave) {
-    inlineWave.className = 'voice-waveform voice-inline-wave';
-    if (s.waveClass) s.waveClass.split(' ').forEach(c => inlineWave.classList.add(c));
-  }
+  if (inlineAvatar) { inlineAvatar.className = 'voice-inline-avatar'; if (s.avatarClass) inlineAvatar.classList.add(s.avatarClass); }
+  if (inlineWave) { inlineWave.className = 'voice-waveform voice-inline-wave'; if (s.waveClass) s.waveClass.split(' ').forEach(c => inlineWave.classList.add(c)); }
 }
 
-// ─── Transcript helpers ───────────────────────────────────────────────────────
 function appendVoiceTranscript(role, text) {
   const inner = document.getElementById('voiceTranscriptInner');
   if (!inner) return;
   inner.querySelector('.voice-hint-text')?.remove();
-
   const cleanText = text.replace(/```json[\s\S]*?```/g, '').trim();
   const div = document.createElement('div');
   div.className = `vtx-msg vtx-${role}`;
@@ -946,23 +1131,12 @@ function appendVoiceTranscript(role, text) {
   inner.scrollTop = inner.scrollHeight;
 }
 
-// ─── UI Setup ─────────────────────────────────────────────────────────────────
 function setupVoice() {
-  // Inline mic button — one click starts the whole session
   document.getElementById('voiceInlineBtn')?.addEventListener('click', () => {
-    if (!voice.isOpen) {
-      openVoiceDialog();
-      setTimeout(() => startVoiceSession(), 200);
-    } else if (!voice.active) {
-      startVoiceSession();
-    }
-    // If session already active, do nothing (stop is the inline stop btn)
+    if (!voice.isOpen) { openVoiceDialog(); setTimeout(() => startVoiceSession(), 200); }
+    else if (!voice.active) { startVoiceSession(); }
   });
-
-  // Inline stop button (replaces send btn during voice)
   document.getElementById('voiceStopInlineBtn')?.addEventListener('click', closeVoiceDialog);
-
-  // Legacy dialog buttons (overlay is hidden but keep so JS doesn't break)
   document.getElementById('voiceDialogClose')?.addEventListener('click', closeVoiceDialog);
   document.getElementById('voiceStopBtn')?.addEventListener('click', stopVoiceSession);
   document.getElementById('voiceDialogClear')?.addEventListener('click', clearVoiceConversation);
@@ -971,7 +1145,6 @@ function setupVoice() {
   });
 }
 
-// ─── Clear voice conversation ─────────────────────────────────────────────────
 function clearVoiceConversation() {
   const wasActive = voice.active;
   stopVoiceSession();
@@ -979,32 +1152,25 @@ function clearVoiceConversation() {
   const inner = document.getElementById('voiceTranscriptInner');
   if (inner) inner.innerHTML = '<p class="voice-hint-text">Speak your question — ARIA will auto-reply and keep listening</p>';
   showToast('Voice conversation cleared', 'info');
-  // If session was running, restart it
   if (wasActive) setTimeout(() => startVoiceSession(), 300);
 }
 
-// ─── Sync inline button visual ────────────────────────────────────────────────
-function _syncInlineBtn(state) {
+function _syncInlineBtn(st) {
   const btn = document.getElementById('voiceInlineBtn');
   if (!btn) return;
   const idle = btn.querySelector('.mic-idle-i');
-  const rec  = btn.querySelector('.mic-rec-i');
+  const rec = btn.querySelector('.mic-rec-i');
   btn.classList.remove('recording', 'busy', 'active');
-  if (state === 'active') {
+  if (st === 'active') {
     btn.classList.add('active');
     if (idle) idle.style.display = 'none';
-    if (rec)  rec.style.display  = '';
-  } else if (state === 'busy') {
-    btn.classList.add('busy');
-    if (idle) idle.style.display = '';
-    if (rec)  rec.style.display  = 'none';
+    if (rec) rec.style.display = '';
   } else {
     if (idle) idle.style.display = '';
-    if (rec)  rec.style.display  = 'none';
+    if (rec) rec.style.display = 'none';
   }
 }
 
-// ─── Enable / disable Stop button ────────────────────────────────────────────
 function _setStopBtn(active) {
   const btn = document.getElementById('voiceStopBtn');
   if (!btn) return;
@@ -1012,17 +1178,16 @@ function _setStopBtn(active) {
   btn.disabled = !active;
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 function getSupportedMime() {
   const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
   for (const t of types) if (MediaRecorder.isTypeSupported(t)) return t;
   return '';
 }
 
-// Legacy stubs — keep so nothing elsewhere breaks
+// Legacy stubs
 function setVoiceStatus() {}
 function voiceStart() {}
 function voiceStop() {}
 function voiceDialogToggle() {}
 function voiceDialogStart() { startVoiceSession(); }
-function voiceDialogStop()  { stopVoiceSession(); }
+function voiceDialogStop() { stopVoiceSession(); }
