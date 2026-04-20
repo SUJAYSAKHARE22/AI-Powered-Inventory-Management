@@ -1,0 +1,327 @@
+{% extends "base.html" %}
+{% block title %}Warehouses{% endblock %}
+{% block page_title %}Warehouses{% endblock %}
+{% block nav_warehouse %}active{% endblock %}
+
+{% block panel %}
+<div class="panel-header">
+  <div class="filter-row">
+    <input type="text" class="filter-input" id="warehouseSearch" placeholder="Search warehouses...">
+    <button class="btn-primary" onclick="openWarehouseForm()">+ Add Warehouse</button>
+  </div>
+</div>
+
+<div class="warehouse-grid" id="warehouseGrid">
+  <div class="loading-cell" style="padding:40px;text-align:center;width:100%">Loading warehouses…</div>
+</div>
+
+<!-- Warehouse Detail Modal -->
+<div class="modal-overlay" id="warehouseDetailModal">
+  <div class="modal glass-card" style="max-width:520px">
+    <div class="modal-header">
+      <h3 id="whDetailName">Warehouse</h3>
+      <button class="modal-close" onclick="closeModal('warehouseDetailModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="wh-detail-grid">
+        <div class="wh-detail-row">
+          <span class="wh-detail-label">📍 Location</span>
+          <span class="wh-detail-val" id="whDetailLocation">—</span>
+        </div>
+        <div class="wh-detail-row">
+          <span class="wh-detail-label">👤 Manager</span>
+          <span class="wh-detail-val" id="whDetailManager">—</span>
+        </div>
+        <div class="wh-detail-row">
+          <span class="wh-detail-label">📦 Capacity</span>
+          <span class="wh-detail-val" id="whDetailCapacity">—</span>
+        </div>
+        <div class="wh-detail-row">
+          <span class="wh-detail-label">🗓️ Created</span>
+          <span class="wh-detail-val" id="whDetailCreated">—</span>
+        </div>
+      </div>
+      <div id="whDetailDesc" style="margin-top:16px;color:var(--text2);font-size:0.9rem;line-height:1.6"></div>
+    </div>
+    <div class="modal-footer" style="justify-content:space-between">
+      <button class="btn-primary" id="whSeeProductsBtn" onclick="seeWarehouseProducts()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:15px;height:15px;margin-right:6px;vertical-align:middle"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+        See Products
+      </button>
+      <div style="display:flex;gap:10px">
+        <button class="btn-ghost" id="whEditBtn" onclick="editWarehouseFromDetail()">Edit</button>
+        <button class="btn-ghost" onclick="closeModal('warehouseDetailModal')">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Warehouse Form Modal (Add / Edit) -->
+<div class="modal-overlay" id="warehouseFormModal">
+  <div class="modal glass-card" style="max-width:480px">
+    <div class="modal-header">
+      <h3 id="whFormTitle">Add Warehouse</h3>
+      <button class="modal-close" onclick="closeModal('warehouseFormModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="whFormId">
+      <div class="form-group">
+        <label>Warehouse Name *</label>
+        <input type="text" id="whFormName" placeholder="e.g. Main Warehouse">
+      </div>
+      <div class="form-group">
+        <label>Location</label>
+        <input type="text" id="whFormLocation" placeholder="e.g. 123 Industrial Ave, Chicago">
+      </div>
+      <div class="form-group">
+        <label>Manager</label>
+        <input type="text" id="whFormManager" placeholder="Manager name">
+      </div>
+      <div class="form-group">
+        <label>Capacity (units)</label>
+        <input type="number" id="whFormCapacity" placeholder="0" min="0">
+      </div>
+      <div class="form-group">
+        <label>Description</label>
+        <textarea id="whFormDesc" rows="3" placeholder="Optional description…"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost" onclick="closeModal('warehouseFormModal')">Cancel</button>
+      <button class="btn-primary" onclick="saveWarehouse()">Save Warehouse</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  let _currentWarehouseId = null;
+
+  document.addEventListener('DOMContentLoaded', () => {
+    loadWarehouses();
+    document.getElementById('warehouseSearch').addEventListener('input', filterWarehouses);
+  });
+
+  let _allWarehouses = [];
+
+  async function loadWarehouses() {
+    try {
+      const res = await fetch('/api/warehouses');
+      _allWarehouses = await res.json();
+      renderWarehouses(_allWarehouses);
+    } catch(e) { console.error(e); }
+  }
+
+  function filterWarehouses() {
+    const q = document.getElementById('warehouseSearch').value.toLowerCase();
+    renderWarehouses(_allWarehouses.filter(w =>
+      w.name.toLowerCase().includes(q) ||
+      (w.location||'').toLowerCase().includes(q) ||
+      (w.manager||'').toLowerCase().includes(q)
+    ));
+  }
+
+  function renderWarehouses(warehouses) {
+    const grid = document.getElementById('warehouseGrid');
+    if (!warehouses.length) {
+      grid.innerHTML = `<div style="padding:60px;text-align:center;color:var(--text3);width:100%">No warehouses found. <button class="btn-primary" style="margin-left:12px" onclick="openWarehouseForm()">+ Add First Warehouse</button></div>`;
+      return;
+    }
+    grid.innerHTML = warehouses.map(w => `
+      <div class="wh-card glass-card" onclick="openWarehouseDetail(${w.id})">
+        <div class="wh-card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:28px;height:28px">
+            <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+            <polyline points="9 22 9 12 15 12 15 22"/>
+          </svg>
+        </div>
+        <div class="wh-card-body">
+          <div class="wh-card-name">${esc(w.name)}</div>
+          <div class="wh-card-loc">${w.location ? esc(w.location) : '<span style="color:var(--text3)">No location set</span>'}</div>
+          <div class="wh-card-meta">
+            <span>👤 ${w.manager ? esc(w.manager) : 'Unassigned'}</span>
+            ${w.capacity ? `<span>📦 ${w.capacity.toLocaleString()} units cap.</span>` : ''}
+          </div>
+        </div>
+        <div class="wh-card-actions" onclick="event.stopPropagation()">
+          <button class="icon-btn" title="Edit" onclick="openWarehouseForm(${w.id})">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="icon-btn danger" title="Delete" onclick="deleteWarehouse(${w.id}, '${esc(w.name)}')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+          </button>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  async function openWarehouseDetail(id) {
+    const w = _allWarehouses.find(x => x.id === id);
+    if (!w) return;
+    _currentWarehouseId = id;
+    document.getElementById('whDetailName').textContent = w.name;
+    document.getElementById('whDetailLocation').textContent = w.location || '—';
+    document.getElementById('whDetailManager').textContent = w.manager || '—';
+    document.getElementById('whDetailCapacity').textContent = w.capacity ? w.capacity.toLocaleString() + ' units' : '—';
+    document.getElementById('whDetailCreated').textContent = new Date(w.created_at).toLocaleDateString('en-US', {year:'numeric',month:'long',day:'numeric'});
+    document.getElementById('whDetailDesc').textContent = w.description || '';
+    document.getElementById('warehouseDetailModal').classList.add('open');
+  }
+
+  function seeWarehouseProducts() {
+    closeModal('warehouseDetailModal');
+    window.location.href = '/products';
+  }
+
+  function editWarehouseFromDetail() {
+    closeModal('warehouseDetailModal');
+    openWarehouseForm(_currentWarehouseId);
+  }
+
+  async function openWarehouseForm(id = null) {
+    document.getElementById('whFormId').value = id || '';
+    document.getElementById('whFormName').value = '';
+    document.getElementById('whFormLocation').value = '';
+    document.getElementById('whFormManager').value = '';
+    document.getElementById('whFormCapacity').value = '';
+    document.getElementById('whFormDesc').value = '';
+    document.getElementById('whFormTitle').textContent = id ? 'Edit Warehouse' : 'Add Warehouse';
+
+    if (id) {
+      const w = _allWarehouses.find(x => x.id === id);
+      if (w) {
+        document.getElementById('whFormName').value = w.name || '';
+        document.getElementById('whFormLocation').value = w.location || '';
+        document.getElementById('whFormManager').value = w.manager || '';
+        document.getElementById('whFormCapacity').value = w.capacity || '';
+        document.getElementById('whFormDesc').value = w.description || '';
+      }
+    }
+    document.getElementById('warehouseFormModal').classList.add('open');
+  }
+
+  async function saveWarehouse() {
+    const id = document.getElementById('whFormId').value;
+    const name = document.getElementById('whFormName').value.trim();
+    if (!name) { showToast('Warehouse name is required', 'error'); return; }
+    const data = {
+      name,
+      location: document.getElementById('whFormLocation').value.trim(),
+      manager: document.getElementById('whFormManager').value.trim(),
+      capacity: parseInt(document.getElementById('whFormCapacity').value) || 0,
+      description: document.getElementById('whFormDesc').value.trim(),
+    };
+    try {
+      const url = id ? `/api/warehouses/${id}` : '/api/warehouses';
+      const method = id ? 'PUT' : 'POST';
+      const res = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
+      const result = await res.json();
+      if (!res.ok) { showToast(result.error || 'Failed to save', 'error'); return; }
+      showToast(id ? `Updated: ${result.name}` : `Created: ${result.name}`, 'success');
+      closeModal('warehouseFormModal');
+      await loadWarehouses();
+    } catch(e) { showToast('Error saving warehouse', 'error'); }
+  }
+
+  async function deleteWarehouse(id, name) {
+    if (!confirm(`Delete warehouse "${name}"? This cannot be undone.`)) return;
+    try {
+      const res = await fetch(`/api/warehouses/${id}`, { method: 'DELETE' });
+      const result = await res.json();
+      showToast(result.message || 'Deleted', 'success');
+      await loadWarehouses();
+    } catch(e) { showToast('Error deleting warehouse', 'error'); }
+  }
+</script>
+
+<style>
+.warehouse-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+  padding: 8px 0;
+}
+
+.wh-card {
+  padding: 20px;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid var(--border);
+  position: relative;
+}
+
+.wh-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+  border-color: var(--accent);
+}
+
+.wh-card-icon {
+  width: 48px; height: 48px;
+  background: linear-gradient(135deg, rgba(123,94,167,0.2), rgba(155,109,255,0.2));
+  border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent2);
+  flex-shrink: 0;
+}
+
+.wh-card-body { flex: 1; }
+
+.wh-card-name {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.wh-card-loc {
+  font-size: 0.84rem;
+  color: var(--text2);
+  margin-bottom: 8px;
+}
+
+.wh-card-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 0.8rem;
+  color: var(--text3);
+}
+
+.wh-card-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.wh-detail-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wh-detail-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.wh-detail-label {
+  font-size: 0.82rem;
+  color: var(--text3);
+  width: 120px;
+  flex-shrink: 0;
+}
+
+.wh-detail-val {
+  color: var(--text);
+  font-size: 0.9rem;
+}
+</style>
+{% endblock %}
