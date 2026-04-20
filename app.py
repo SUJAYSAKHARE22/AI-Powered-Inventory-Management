@@ -147,6 +147,32 @@ class Notification(db.Model):
         }
 
 
+class Warehouse(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    location = db.Column(db.String(300), default='')
+    manager = db.Column(db.String(200), default='')
+    capacity = db.Column(db.Integer, default=0)
+    description = db.Column(db.Text, default='')
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        product_count = Product.query.filter_by(is_active=True).count()
+        return {
+            'id': self.id,
+            'name': self.name,
+            'location': self.location,
+            'manager': self.manager,
+            'capacity': self.capacity,
+            'description': self.description,
+            'is_active': self.is_active,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat(),
+        }
+
+
 # ─── Auth helpers ──────────────────────────────────────────────────────────────
 
 def login_required(f):
@@ -199,9 +225,16 @@ def api_me():
 
 # ─── Main Route ────────────────────────────────────────────────────────────────
 @app.route('/')
-@login_required
 def index():
-    return redirect(url_for('page_chat'))
+    if session.get('user_id'):
+        return redirect(url_for('page_chat'))
+    return render_template('homepage.html')
+
+@app.route('/home')
+def homepage():
+    if session.get('user_id'):
+        return redirect(url_for('page_chat'))
+    return render_template('homepage.html')
  
 @app.route('/chat')
 @login_required
@@ -232,6 +265,64 @@ def page_transactions():
 @login_required
 def page_import_export():
     return render_template('import_export.html')
+
+@app.route('/warehouses')
+@login_required
+def page_warehouses():
+    return render_template('warehouses.html')
+
+# ─── Warehouse API Routes ──────────────────────────────────────────────────────
+
+@app.route('/api/warehouses', methods=['GET'])
+@login_required
+def get_warehouses():
+    warehouses = Warehouse.query.filter_by(is_active=True).all()
+    return jsonify([w.to_dict() for w in warehouses])
+
+@app.route('/api/warehouses', methods=['POST'])
+@login_required
+def create_warehouse():
+    data = request.json or {}
+    if not data.get('name'):
+        return jsonify({'error': 'Warehouse name is required'}), 400
+    w = Warehouse(
+        name=sanitize(data['name']),
+        location=sanitize(data.get('location', '')),
+        manager=sanitize(data.get('manager', '')),
+        capacity=max(0, int(data.get('capacity', 0))),
+        description=sanitize(data.get('description', '')),
+    )
+    db.session.add(w)
+    db.session.commit()
+    return jsonify(w.to_dict()), 201
+
+@app.route('/api/warehouses/<int:wid>', methods=['GET'])
+@login_required
+def get_warehouse(wid):
+    w = Warehouse.query.get_or_404(wid)
+    return jsonify(w.to_dict())
+
+@app.route('/api/warehouses/<int:wid>', methods=['PUT'])
+@login_required
+def update_warehouse(wid):
+    w = Warehouse.query.get_or_404(wid)
+    data = request.json or {}
+    for field in ['name', 'location', 'manager', 'description']:
+        if field in data:
+            setattr(w, field, sanitize(data[field]))
+    if 'capacity' in data:
+        w.capacity = max(0, int(data['capacity']))
+    w.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(w.to_dict())
+
+@app.route('/api/warehouses/<int:wid>', methods=['DELETE'])
+@login_required
+def delete_warehouse(wid):
+    w = Warehouse.query.get_or_404(wid)
+    w.is_active = False
+    db.session.commit()
+    return jsonify({'message': f"Warehouse '{w.name}' deleted successfully"})
 
 # ─── Product Routes ────────────────────────────────────────────────────────────
 
@@ -1131,25 +1222,17 @@ def seed_sample_data():
         db.session.add_all([admin, viewer])
         db.session.commit()
 
-    if Product.query.count() == 0:
-        samples = [
-            Product(name='Wireless Keyboard', sku='ELEC-001', category='Electronics',
-                    quantity=45, unit_price=79.99, cost_price=40.00, supplier='TechSupplies Co.', low_stock_threshold=10, supplier_lead_days=5),
-            Product(name='USB-C Hub', sku='ELEC-002', category='Electronics',
-                    quantity=8, unit_price=49.99, cost_price=20.00, supplier='TechSupplies Co.', low_stock_threshold=10, supplier_lead_days=5),
-            Product(name='Office Chair', sku='FURN-001', category='Furniture',
-                    quantity=12, unit_price=299.99, cost_price=150.00, supplier='OfficeWorld', low_stock_threshold=5, supplier_lead_days=14),
-            Product(name='Standing Desk', sku='FURN-002', category='Furniture',
-                    quantity=3, unit_price=599.99, cost_price=280.00, supplier='OfficeWorld', low_stock_threshold=5, supplier_lead_days=14),
-            Product(name='Notebook Pack', sku='STAT-001', category='Stationery',
-                    quantity=150, unit_price=12.99, cost_price=5.00, supplier='PaperMart', low_stock_threshold=20, supplier_lead_days=3),
-            Product(name='Ballpoint Pens (50pk)', sku='STAT-002', category='Stationery',
-                    quantity=0, unit_price=8.99, cost_price=3.00, supplier='PaperMart', low_stock_threshold=15, supplier_lead_days=3),
-            Product(name='Monitor 27"', sku='ELEC-003', category='Electronics',
-                    quantity=22, unit_price=399.99, cost_price=200.00, supplier='DisplayTech', low_stock_threshold=8, supplier_lead_days=10),
-            Product(name='Ergonomic Mouse', sku='ELEC-004', category='Electronics',
-                    quantity=6, unit_price=59.99, cost_price=25.00, supplier='TechSupplies Co.', low_stock_threshold=10, supplier_lead_days=5),
+    if Warehouse.query.count() == 0:
+        sample_warehouses = [
+            Warehouse(name='Main Warehouse', location='123 Industrial Ave, Chicago, IL', manager='John Smith', capacity=10000, description='Primary storage facility for all electronics and furniture.'),
+            Warehouse(name='East Wing Storage', location='456 Commerce Blvd, New York, NY', manager='Jane Doe', capacity=5000, description='Secondary storage for stationery and overflow stock.'),
         ]
+        for wh in sample_warehouses:
+            db.session.add(wh)
+        db.session.commit()
+
+    if Product.query.count() == 0:
+        samples = []
         for s in samples:
             db.session.add(s)
         db.session.commit()

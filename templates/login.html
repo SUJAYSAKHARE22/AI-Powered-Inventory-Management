@@ -190,7 +190,7 @@ async function doLogin() {
     });
     const data = await res.json();
     if (res.ok) {
-      window.location.href = '/';
+      window.location.href = '/chat';
     } else {
       showError(data.error || 'Login failed');
     }

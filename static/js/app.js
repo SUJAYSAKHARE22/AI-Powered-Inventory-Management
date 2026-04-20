@@ -30,7 +30,7 @@ async function loadMe() {
 
 async function doLogout() {
   await fetch('/api/auth/logout', { method: 'POST' });
-  window.location.href = '/login';
+  window.location.href = '/';
 }
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
@@ -54,6 +54,7 @@ function switchPanel(name) {
     add: '/add-product',
     transactions: '/transactions',
     import: '/import-export',
+    warehouses: '/warehouses',
     notifications: '/chat',  // notifications shown on chat page (bell icon)
   };
   if (routes[name]) window.location.href = routes[name];
