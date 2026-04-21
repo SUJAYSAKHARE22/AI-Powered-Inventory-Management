@@ -528,11 +528,72 @@ function txChangePage(page) {
   loadTransactions();
 }
 
-function exportTxCSV() {
+async function exportTxCSV() {
   const txType = document.getElementById('txTypeFilter')?.value || '';
+  const fromDate = document.getElementById('txFromDate')?.value || '';
+  const toDate = document.getElementById('txToDate')?.value || '';
+
   let url = '/api/transactions?per_page=10000';
   if (txType) url += `&type=${txType}`;
-  window.open(url, '_blank');
+  if (fromDate) url += `&from=${fromDate}`;
+  if (toDate) url += `&to=${toDate}T23:59:59`;
+
+  try {
+    showToast('Preparing Excel file…', 'info');
+
+    const res = await fetch(url);
+    if (!res.ok) { showToast('Failed to fetch transactions', 'error'); return; }
+    const data = await res.json();
+    const txs = data.transactions || data;
+
+    if (!txs.length) { showToast('No transactions to export', 'info'); return; }
+
+    // Load SheetJS from CDN if not already loaded
+    if (typeof XLSX === 'undefined') {
+      await new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+        script.onload = resolve;
+        script.onerror = () => reject(new Error('Failed to load SheetJS'));
+        document.head.appendChild(script);
+      });
+    }
+
+    // Build rows
+    const rows = txs.map(t => ({
+      'Date':             t.created_at ? new Date(t.created_at).toLocaleString() : '',
+      'Product Name':     t.product_name || '',
+      'SKU':              t.product_sku || '',
+      'Type':             t.transaction_type || '',
+      'Quantity':         t.quantity,
+      'Performed By':     t.created_by || 'system',
+      'Note':             t.note || '',
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+
+    // Column widths
+    ws['!cols'] = [
+      { wch: 22 }, // Date
+      { wch: 28 }, // Product Name
+      { wch: 16 }, // SKU
+      { wch: 12 }, // Type
+      { wch: 10 }, // Quantity
+      { wch: 18 }, // Performed By
+      { wch: 32 }, // Note
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Transactions');
+
+    const timestamp = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `transactions_${timestamp}.xlsx`);
+    showToast('Excel file downloaded!', 'success');
+
+  } catch (e) {
+    console.error(e);
+    showToast('Export failed: ' + e.message, 'error');
+  }
 }
 
 // ─── Import / Export ──────────────────────────────────────────────────────────
