@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ARIA — Create Account</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0b0f; --surface: #13141a; --border: rgba(255,255,255,0.07);
+    --text: #e8e9f0; --text2: #9a9bb0; --text3: #5a5b70;
+    --accent: #7b5ea7; --accent2: #9b6dff; --cyan: #4ecdc4;
+    --green: #52e3a8; --red: #ff6b6b; --yellow: #ffd166;
+    --glow: rgba(123,94,167,0.35);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    padding: 24px;
+  }
+  .bg-orbs { position: fixed; inset: 0; pointer-events: none; z-index: 0; }
+  .orb {
+    position: absolute; border-radius: 50%;
+    filter: blur(80px); opacity: 0.15;
+    animation: drift 12s ease-in-out infinite alternate;
+  }
+  .orb-1 { width:500px;height:500px;background:radial-gradient(circle,#7b5ea7,transparent);top:-100px;left:-100px; }
+  .orb-2 { width:400px;height:400px;background:radial-gradient(circle,#4ecdc4,transparent);bottom:-100px;right:-50px;animation-delay:-4s; }
+  .orb-3 { width:300px;height:300px;background:radial-gradient(circle,#9b6dff,transparent);top:50%;left:60%;animation-delay:-8s; }
+  @keyframes drift { from{transform:translate(0,0)} to{transform:translate(30px,20px)} }
+
+  .register-card {
+    position: relative; z-index: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    padding: 48px 40px;
+    width: 100%; max-width: 480px;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.5), 0 0 0 1px var(--border), 0 0 60px var(--glow);
+  }
+
+  /* Logo */
+  .logo { display:flex; align-items:center; gap:14px; margin-bottom:32px; }
+  .logo-icon {
+    width:48px; height:48px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius:14px;
+    display:flex; align-items:center; justify-content:center;
+    box-shadow: 0 0 24px var(--glow);
+    flex-shrink: 0;
+  }
+  .logo-icon svg { width:24px; height:24px; color:#fff; }
+  .logo-name { font-family:'Syne',sans-serif; font-size:1.8rem; font-weight:800; color:var(--text); }
+  .logo-sub { font-size:0.78rem; color:var(--text3); letter-spacing:0.06em; display:block; }
+
+  h2 { font-family:'Syne',sans-serif; font-size:1.4rem; font-weight:700; margin-bottom:6px; }
+  .subtitle { color:var(--text2); font-size:0.9rem; margin-bottom:28px; }
+
+  /* Form */
+  .form-row { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .form-group { margin-bottom:16px; }
+  .form-group.full { grid-column: 1 / -1; }
+  label { display:block; font-size:0.82rem; color:var(--text2); margin-bottom:7px; font-weight:500; }
+
+  input[type=text], input[type=email], input[type=password], select {
+    width:100%;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius:12px;
+    padding:13px 16px;
+    color:var(--text);
+    font-size:0.93rem;
+    font-family:'DM Sans',sans-serif;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    outline: none;
+    appearance: none;
+  }
+  input:focus, select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(123,94,167,0.2);
+  }
+  select option { background: #1e1f28; color: var(--text); }
+
+  /* Password strength */
+  .pw-strength-bar {
+    height: 3px;
+    border-radius: 2px;
+    margin-top: 8px;
+    background: rgba(255,255,255,0.07);
+    overflow: hidden;
+  }
+  .pw-strength-fill {
+    height: 100%;
+    border-radius: 2px;
+    width: 0%;
+    transition: width 0.3s, background 0.3s;
+  }
+  .pw-strength-label {
+    font-size: 0.75rem;
+    color: var(--text3);
+    margin-top: 4px;
+    height: 14px;
+  }
+
+  /* Divider */
+  .divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 6px 0 20px;
+    color: var(--text3);
+    font-size: 0.78rem;
+  }
+  .divider::before, .divider::after {
+    content: ''; flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* Buttons */
+  .btn-register {
+    width:100%;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color:#fff;
+    border:none;
+    border-radius:12px;
+    padding:15px;
+    font-size:1rem;
+    font-weight:600;
+    font-family:'DM Sans',sans-serif;
+    cursor:pointer;
+    margin-top:4px;
+    transition: opacity 0.2s, transform 0.1s, box-shadow 0.2s;
+    box-shadow: 0 8px 24px var(--glow);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .btn-register:hover { opacity:0.9; transform:translateY(-1px); }
+  .btn-register:active { transform:translateY(0); }
+  .btn-register:disabled { opacity:0.5; cursor:not-allowed; transform:none; }
+
+  /* Messages */
+  .error-msg, .success-msg {
+    border-radius:10px;
+    padding:12px 16px;
+    font-size:0.88rem;
+    margin-bottom:18px;
+    display:none;
+    line-height: 1.5;
+  }
+  .error-msg {
+    background: rgba(255,107,107,0.1);
+    border: 1px solid rgba(255,107,107,0.3);
+    color: var(--red);
+  }
+  .success-msg {
+    background: rgba(82,227,168,0.1);
+    border: 1px solid rgba(82,227,168,0.3);
+    color: var(--green);
+  }
+
+  /* Footer link */
+  .login-link {
+    text-align: center;
+    margin-top: 20px;
+    font-size: 0.88rem;
+    color: var(--text3);
+  }
+  .login-link a {
+    color: var(--accent2);
+    text-decoration: none;
+    font-weight: 500;
+  }
+  .login-link a:hover { text-decoration: underline; }
+
+  /* Business type badges */
+  .plan-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .plan-option {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 6px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    font-size: 0.8rem;
+    color: var(--text2);
+    user-select: none;
+  }
+  .plan-option:hover { border-color: var(--accent); background: rgba(123,94,167,0.08); }
+  .plan-option.selected { border-color: var(--accent2); background: rgba(155,109,255,0.15); color: var(--text); }
+  .plan-option .plan-icon { font-size: 1.3rem; margin-bottom: 4px; display: block; }
+  .plan-option input { display: none; }
+
+  /* Field validation icon */
+  .input-wrap { position: relative; }
+  .input-wrap .v-icon {
+    position: absolute;
+    right: 14px; top: 50%; transform: translateY(-50%);
+    font-size: 0.85rem;
+    display: none;
+  }
+  .input-wrap.valid .v-icon.ok   { display: block; }
+  .input-wrap.invalid .v-icon.err { display: block; }
+  .input-wrap.valid input  { border-color: rgba(82,227,168,0.5); }
+  .input-wrap.invalid input { border-color: rgba(255,107,107,0.5); }
+
+  /* Spinner */
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: none;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  @media (max-width: 480px) {
+    .register-card { padding: 32px 24px; }
+    .form-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="bg-orbs">
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+</div>
+
+<div class="register-card">
+  <div class="logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 24 24" fill="none">
+        <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        <path d="M2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div>
+      <div class="logo-name">ARIA</div>
+      <span class="logo-sub">AI INVENTORY SYSTEM</span>
+    </div>
+  </div>
+
+  <h2>Create your account</h2>
+  <p class="subtitle">Start managing your inventory with AI — free to get started</p>
+
+  <div class="error-msg"   id="errorMsg"></div>
+  <div class="success-msg" id="successMsg"></div>
+
+  <!-- Business type selector -->
+  <div class="form-group">
+    <label>Business Type</label>
+    <div class="plan-grid" id="bizTypeGrid">
+      <label class="plan-option selected">
+        <input type="radio" name="biz_type" value="retail" checked>
+        <span class="plan-icon">🛒</span>Retail
+      </label>
+      <label class="plan-option">
+        <input type="radio" name="biz_type" value="wholesale">
+        <span class="plan-icon">🏭</span>Wholesale
+      </label>
+      <label class="plan-option">
+        <input type="radio" name="biz_type" value="ecommerce">
+        <span class="plan-icon">💻</span>E-Commerce
+      </label>
+      <label class="plan-option">
+        <input type="radio" name="biz_type" value="manufacturing">
+        <span class="plan-icon">⚙️</span>Manufacturing
+      </label>
+      <label class="plan-option">
+        <input type="radio" name="biz_type" value="pharmacy">
+        <span class="plan-icon">💊</span>Pharmacy
+      </label>
+      <label class="plan-option">
+        <input type="radio" name="biz_type" value="other">
+        <span class="plan-icon">📦</span>Other
+      </label>
+    </div>
+  </div>
+
+  <div class="divider">Account Details</div>
+
+  <div class="form-row">
+    <div class="form-group">
+      <label>First Name *</label>
+      <div class="input-wrap" id="wrap-first_name">
+        <input type="text" id="first_name" placeholder="John" autocomplete="given-name">
+        <span class="v-icon ok">✅</span>
+        <span class="v-icon err">❌</span>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Last Name *</label>
+      <div class="input-wrap" id="wrap-last_name">
+        <input type="text" id="last_name" placeholder="Doe" autocomplete="family-name">
+        <span class="v-icon ok">✅</span>
+        <span class="v-icon err">❌</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="form-group">
+    <label>Company / Business Name *</label>
+    <div class="input-wrap" id="wrap-company">
+      <input type="text" id="company" placeholder="Acme Supplies Ltd." autocomplete="organization">
+      <span class="v-icon ok">✅</span>
+      <span class="v-icon err">❌</span>
+    </div>
+  </div>
+
+  <div class="form-group">
+    <label>Email Address *</label>
+    <div class="input-wrap" id="wrap-email">
+      <input type="email" id="email" placeholder="john@example.com" autocomplete="email">
+      <span class="v-icon ok">✅</span>
+      <span class="v-icon err">❌</span>
+    </div>
+  </div>
+
+  <div class="form-row">
+    <div class="form-group">
+      <label>Username *</label>
+      <div class="input-wrap" id="wrap-username">
+        <input type="text" id="username" placeholder="john_doe" autocomplete="username" oninput="checkUsername(this)">
+        <span class="v-icon ok">✅</span>
+        <span class="v-icon err">❌</span>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Phone <span style="color:var(--text3);font-size:0.75rem">(optional)</span></label>
+      <input type="text" id="phone" placeholder="+1 234 567 8900" autocomplete="tel">
+    </div>
+  </div>
+
+  <div class="divider">Set Password</div>
+
+  <div class="form-group">
+    <label>Password *</label>
+    <div class="input-wrap" id="wrap-password">
+      <input type="password" id="password" placeholder="Min. 8 characters" autocomplete="new-password" oninput="checkStrength(this.value)">
+      <span class="v-icon ok">✅</span>
+      <span class="v-icon err">❌</span>
+    </div>
+    <div class="pw-strength-bar"><div class="pw-strength-fill" id="pwStrengthFill"></div></div>
+    <div class="pw-strength-label" id="pwStrengthLabel"></div>
+  </div>
+
+  <div class="form-group">
+    <label>Confirm Password *</label>
+    <div class="input-wrap" id="wrap-confirm_password">
+      <input type="password" id="confirm_password" placeholder="Repeat password" autocomplete="new-password">
+      <span class="v-icon ok">✅</span>
+      <span class="v-icon err">❌</span>
+    </div>
+  </div>
+
+  <button class="btn-register" id="registerBtn" onclick="doRegister()">
+    <div class="spinner" id="btnSpinner"></div>
+    <span id="btnText">Create Account</span>
+  </button>
+
+  <div class="login-link">
+    Already have an account? <a href="/login">Sign in →</a>
+  </div>
+</div>
+
+<script>
+/* ── Business type pill selection ── */
+document.querySelectorAll('.plan-option').forEach(label => {
+  label.addEventListener('click', () => {
+    document.querySelectorAll('.plan-option').forEach(l => l.classList.remove('selected'));
+    label.classList.add('selected');
+  });
+});
+
+/* ── Password strength ── */
+function checkStrength(pw) {
+  const fill  = document.getElementById('pwStrengthFill');
+  const label = document.getElementById('pwStrengthLabel');
+  let score = 0;
+  if (pw.length >= 8)  score++;
+  if (/[A-Z]/.test(pw)) score++;
+  if (/[0-9]/.test(pw)) score++;
+  if (/[^A-Za-z0-9]/.test(pw)) score++;
+
+  const levels = [
+    { pct: '0%',   color: 'transparent', text: '' },
+    { pct: '25%',  color: '#ff6b6b',     text: '⚠️ Weak' },
+    { pct: '50%',  color: '#ffd166',     text: '🟡 Fair' },
+    { pct: '75%',  color: '#4ecdc4',     text: '🟢 Good' },
+    { pct: '100%', color: '#52e3a8',     text: '💪 Strong' },
+  ];
+  const lvl = levels[score];
+  fill.style.width    = lvl.pct;
+  fill.style.background = lvl.color;
+  label.textContent   = lvl.text;
+
+  const wrap = document.getElementById('wrap-password');
+  if (pw.length === 0) { wrap.className = 'input-wrap'; }
+  else if (score < 2)  { wrap.className = 'input-wrap invalid'; }
+  else                 { wrap.className = 'input-wrap valid'; }
+}
+
+/* ── Username availability check (debounced) ── */
+let _unTimer = null;
+function checkUsername(input) {
+  clearTimeout(_unTimer);
+  const wrap = document.getElementById('wrap-username');
+  const val  = input.value.trim();
+  if (!val || val.length < 3) { wrap.className = 'input-wrap'; return; }
+  _unTimer = setTimeout(async () => {
+    try {
+      const res  = await fetch('/api/auth/check-username', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: val })
+      });
+      const data = await res.json();
+      wrap.className = data.available ? 'input-wrap valid' : 'input-wrap invalid';
+    } catch { /* network error, ignore */ }
+  }, 500);
+}
+
+/* ── Inline field validation ── */
+function validateField(id, fn) {
+  const el   = document.getElementById(id);
+  const wrap = document.getElementById('wrap-' + id);
+  if (!el || !wrap) return fn('');
+  const val  = el.value.trim();
+  const ok   = fn(val);
+  if (val.length === 0) { wrap.className = 'input-wrap'; }
+  else { wrap.className = ok ? 'input-wrap valid' : 'input-wrap invalid'; }
+  return ok;
+}
+
+['first_name','last_name','company'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('blur', () => validateField(id, v => v.length > 0));
+});
+document.getElementById('email').addEventListener('blur', () =>
+  validateField('email', v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))
+);
+document.getElementById('confirm_password').addEventListener('input', () =>
+  validateField('confirm_password', v => v === document.getElementById('password').value)
+);
+
+/* ── Main register function ── */
+async function doRegister() {
+  hideMessages();
+
+  const first_name        = document.getElementById('first_name').value.trim();
+  const last_name         = document.getElementById('last_name').value.trim();
+  const company           = document.getElementById('company').value.trim();
+  const email             = document.getElementById('email').value.trim();
+  const username          = document.getElementById('username').value.trim();
+  const phone             = document.getElementById('phone').value.trim();
+  const password          = document.getElementById('password').value;
+  const confirm_password  = document.getElementById('confirm_password').value;
+  const biz_type          = document.querySelector('input[name="biz_type"]:checked')?.value || 'other';
+
+  /* Client-side validation */
+  if (!first_name || !last_name) return showError('Please enter your first and last name.');
+  if (!company)                  return showError('Please enter your company or business name.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showError('Please enter a valid email address.');
+  if (!username || username.length < 3) return showError('Username must be at least 3 characters.');
+  if (!/^[a-zA-Z0-9_]+$/.test(username)) return showError('Username can only contain letters, numbers, and underscores.');
+  if (password.length < 8)       return showError('Password must be at least 8 characters.');
+  if (password !== confirm_password) return showError('Passwords do not match.');
+
+  setLoading(true);
+
+  try {
+    const res = await fetch('/api/auth/register', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ first_name, last_name, company, email, username, phone, password, biz_type })
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      showSuccess('🎉 Account created! Redirecting to your dashboard…');
+      setTimeout(() => { window.location.href = '/chat'; }, 1500);
+    } else {
+      showError(data.error || 'Registration failed. Please try again.');
+    }
+  } catch (e) {
+    showError('Network error. Please check your connection and try again.');
+  } finally {
+    setLoading(false);
+  }
+}
+
+function setLoading(on) {
+  const btn     = document.getElementById('registerBtn');
+  const spinner = document.getElementById('btnSpinner');
+  const text    = document.getElementById('btnText');
+  btn.disabled        = on;
+  spinner.style.display = on ? 'block' : 'none';
+  text.textContent    = on ? 'Creating account…' : 'Create Account';
+}
+
+function showError(msg) {
+  const el = document.getElementById('errorMsg');
+  el.textContent    = msg;
+  el.style.display  = 'block';
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function showSuccess(msg) {
+  const el = document.getElementById('successMsg');
+  el.textContent   = msg;
+  el.style.display = 'block';
+}
+
+function hideMessages() {
+  document.getElementById('errorMsg').style.display   = 'none';
+  document.getElementById('successMsg').style.display = 'none';
+}
+
+/* Allow Enter key to submit */
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && document.activeElement.tagName !== 'TEXTAREA') doRegister();
+});
+</script>
+</body>
+</html>

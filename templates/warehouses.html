@@ -148,11 +148,13 @@
   function renderWarehouses(warehouses) {
     const grid = document.getElementById('warehouseGrid');
     if (!warehouses.length) {
-      grid.innerHTML = `<div style="padding:60px;text-align:center;color:var(--text3);width:100%">No warehouses found. <button class="btn-primary" style="margin-left:12px" onclick="openWarehouseForm()">+ Add First Warehouse</button></div>`;
+      grid.innerHTML = `<div style="padding:60px;text-align:center;color:var(--text3);width:100%">No warehouses found. <button class="btn-primary" style="margin-left:12px" onclick="openWarehouseForm()">+ Add Warehouse</button></div>`;
       return;
     }
+    // The default warehouse is the one with the lowest id (created first)
+    const defaultId = _allWarehouses.reduce((min, w) => w.id < min ? w.id : min, _allWarehouses[0].id);
     grid.innerHTML = warehouses.map(w => `
-      <div class="wh-card glass-card" onclick="openWarehouseDetail(${w.id})">
+      <div class="wh-card glass-card${w.id === defaultId ? ' wh-card-default' : ''}" onclick="openWarehouseDetail(${w.id})">
         <div class="wh-card-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:28px;height:28px">
             <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
@@ -160,7 +162,10 @@
           </svg>
         </div>
         <div class="wh-card-body">
-          <div class="wh-card-name">${esc(w.name)}</div>
+          <div class="wh-card-name">
+            ${esc(w.name)}
+            ${w.id === defaultId ? '<span class="wh-default-badge">Default</span>' : ''}
+          </div>
           <div class="wh-card-loc">${w.location ? esc(w.location) : '<span style="color:var(--text3)">No location set</span>'}</div>
           <div class="wh-card-meta">
             <span>👤 ${w.manager ? esc(w.manager) : 'Unassigned'}</span>
@@ -459,6 +464,26 @@
 .wh-detail-val {
   color: var(--text);
   font-size: 0.9rem;
+}
+
+.wh-default-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 20px;
+  margin-left: 8px;
+  vertical-align: middle;
+  line-height: 1.6;
+}
+
+.wh-card-default {
+  border-color: var(--accent2) !important;
+  box-shadow: 0 0 0 1px rgba(155,109,255,0.25), 0 4px 18px rgba(155,109,255,0.12);
 }
 </style>
 {% endblock %}

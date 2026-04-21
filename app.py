@@ -251,6 +251,19 @@ def api_signup():
     )
     db.session.add(user)
     db.session.commit()
+
+    # Auto-create a default warehouse for every new user
+    default_warehouse = Warehouse(
+        user_id=user.id,
+        name='Default Warehouse',
+        location='',
+        manager='',
+        capacity=0,
+        description='Your default warehouse. Products added without a warehouse selection are stored here.',
+    )
+    db.session.add(default_warehouse)
+    db.session.commit()
+
     session['user_id'] = user.id
     session['username'] = user.username
     session['role'] = user.role
@@ -437,11 +450,15 @@ def create_product():
     if Product.query.filter_by(sku=sku, user_id=uid, is_active=True).first():
         return jsonify({'error': f"SKU '{sku}' already exists in your inventory"}), 400
 
-    # Validate warehouse belongs to user
+    # Validate warehouse belongs to user; fall back to default (first) warehouse if none selected
     if warehouse_id:
         wh = Warehouse.query.filter_by(id=warehouse_id, user_id=uid, is_active=True).first()
         if not wh:
             warehouse_id = None
+    if not warehouse_id:
+        default_wh = Warehouse.query.filter_by(user_id=uid, is_active=True).order_by(Warehouse.id.asc()).first()
+        if default_wh:
+            warehouse_id = default_wh.id
 
     expiry = None
     if data.get('expiry_date'):
