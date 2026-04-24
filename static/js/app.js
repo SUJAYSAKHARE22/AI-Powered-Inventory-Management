@@ -1601,3 +1601,32 @@ y: { ticks: { color: '#9a9bb0', font: { size: 11 } }, grid: { color: 'rgba(255,2
     }
   });
 }
+
+
+  const themeToggle = document.getElementById('theme-toggle');
+  const sunIcon = document.getElementById('theme-icon-sun');
+  const moonIcon = document.getElementById('theme-icon-moon');
+  const body = document.body;
+
+  // Check for saved theme in localStorage
+  const currentTheme = localStorage.getItem('theme');
+  if (currentTheme === 'light') {
+    body.classList.add('light-mode');
+    sunIcon.style.display = 'block';
+    moonIcon.style.display = 'none';
+  }
+
+  themeToggle.addEventListener('click', () => {
+    body.classList.toggle('light-mode');
+    
+    // Toggle Icons and Save Preference
+    if (body.classList.contains('light-mode')) {
+      localStorage.setItem('theme', 'light');
+      sunIcon.style.display = 'block';
+      moonIcon.style.display = 'none';
+    } else {
+      localStorage.setItem('theme', 'dark');
+      sunIcon.style.display = 'none';
+      moonIcon.style.display = 'block';
+    }
+  });
