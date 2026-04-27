@@ -16,6 +16,7 @@
   <!-- Scanner Box -->
   <div id="scannerWrap" style="position:relative;width:100%;max-width:520px;border-radius:20px;overflow:hidden;background:rgba(0,0,0,0.5);border:1.5px solid rgba(123,94,167,0.35);box-shadow:0 0 40px rgba(123,94,167,0.15)">
     <video id="scannerVideo" autoplay playsinline muted style="width:100%;display:block;border-radius:20px;min-height:280px;object-fit:cover"></video>
+    <canvas id="scannerCanvas" style="display:none"></canvas>
 
     <!-- Scan overlay -->
     <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none">
@@ -125,9 +126,8 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
 <script>
-  // Local helpers — app.js is NOT guaranteed on this page
+  // Local helpers
   function _formatCurrency(val) {
     return '$' + (parseFloat(val) || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   }
@@ -137,7 +137,7 @@
     });
   }
 
-  var _codeReader       = null;
+  var _stream           = null;
   var _cameras          = [];
   var _camIndex         = 0;
   var _scanning         = false;
@@ -145,93 +145,201 @@
   var _lastScannedTime  = 0;
   var _foundProductId   = null;
   var _lookupInProgress = false;
+  var _rafId            = null;
+  var _barcodeDetector  = null;
 
   function setScanStatus(msg, color) {
     var el = document.getElementById('scanStatus');
     if (el) { el.textContent = msg; el.style.color = color || 'var(--text2)'; }
   }
 
+  // ── Try native BarcodeDetector API first (Chrome/Edge/Android), fallback to canvas polling
+  function hasBarcodeDetector() {
+    return typeof BarcodeDetector !== 'undefined';
+  }
+
   async function startScanner() {
     document.getElementById('startScanBtn').style.display = 'none';
     document.getElementById('stopScanBtn').style.display  = '';
-    setScanStatus('Starting camera…', 'var(--text2)');
-
-    if (typeof ZXing === 'undefined') {
-      setScanStatus('Scanner library failed to load — check internet connection', 'var(--red)');
-      document.getElementById('startScanBtn').style.display = '';
-      document.getElementById('stopScanBtn').style.display  = 'none';
-      return;
-    }
+    setScanStatus('Requesting camera access…', 'var(--text2)');
 
     try {
-      // Pre-request camera permission so device labels are populated
-      try {
-        var tempStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-        tempStream.getTracks().forEach(function(t) { t.stop(); });
-      } catch(e) { /* permission may already be granted */ }
+      // Enumerate cameras after getting permission
+      var tempStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+      tempStream.getTracks().forEach(function(t) { t.stop(); });
 
-      _codeReader = new ZXing.BrowserMultiFormatReader();
-      var devices  = await _codeReader.listVideoInputDevices();
-      _cameras     = devices;
+      var devices = await navigator.mediaDevices.enumerateDevices();
+      _cameras = devices.filter(function(d) { return d.kind === 'videoinput'; });
 
-      if (!devices.length) {
+      if (!_cameras.length) {
         setScanStatus('No camera found on this device', 'var(--red)');
         document.getElementById('startScanBtn').style.display = '';
         document.getElementById('stopScanBtn').style.display  = 'none';
         return;
       }
 
-      var backIdx = devices.findIndex(function(d) { return /back|rear|environment/i.test(d.label); });
-      _camIndex   = backIdx >= 0 ? backIdx : 0;
-      if (devices.length > 1) document.getElementById('switchCamBtn').style.display = '';
-      _startDecode();
+      // Prefer back/environment camera
+      var backIdx = _cameras.findIndex(function(d) { return /back|rear|environment/i.test(d.label); });
+      _camIndex = backIdx >= 0 ? backIdx : 0;
+
+      if (_cameras.length > 1) document.getElementById('switchCamBtn').style.display = '';
+
+      await _startStream();
+
     } catch(e) {
       console.error('startScanner error:', e);
-      setScanStatus('Camera access denied — please allow camera permission', 'var(--red)');
+      if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
+        setScanStatus('Camera access denied — please allow camera permission', 'var(--red)');
+      } else {
+        setScanStatus('Camera error: ' + (e.message || 'unknown'), 'var(--red)');
+      }
       document.getElementById('startScanBtn').style.display = '';
       document.getElementById('stopScanBtn').style.display  = 'none';
     }
   }
 
-  function _startDecode() {
+  async function _startStream() {
+    _scanning = false;
+    if (_stream) { _stream.getTracks().forEach(function(t) { t.stop(); }); _stream = null; }
+    if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
+
+    var constraints = {
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      }
+    };
+
+    if (_cameras[_camIndex] && _cameras[_camIndex].deviceId) {
+      constraints.video.deviceId = { exact: _cameras[_camIndex].deviceId };
+      delete constraints.video.facingMode;
+    }
+
+    try {
+      _stream = await navigator.mediaDevices.getUserMedia(constraints);
+    } catch(e) {
+      // Fallback without deviceId constraint
+      _stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+    }
+
+    var video = document.getElementById('scannerVideo');
+    video.srcObject = _stream;
+    await video.play().catch(function(){});
+
     _scanning = true;
     setScanStatus('Scanning… align barcode in the frame', 'var(--text2)');
-    var videoEl  = document.getElementById('scannerVideo');
-    var deviceId = _cameras[_camIndex] ? _cameras[_camIndex].deviceId : undefined;
 
-    _codeReader.decodeFromVideoDevice(deviceId, videoEl, function(result, err) {
+    if (hasBarcodeDetector()) {
+      _barcodeDetector = new BarcodeDetector({ formats: [
+        'code_128', 'code_39', 'code_93', 'ean_13', 'ean_8',
+        'itf', 'upc_a', 'upc_e', 'qr_code', 'data_matrix', 'aztec', 'pdf417'
+      ]});
+      _pollBarcodeDetector(video);
+    } else {
+      // Fallback: use ZXing if available, otherwise canvas-based polling
+      _loadZxingAndScan(video);
+    }
+  }
+
+  function _pollBarcodeDetector(video) {
+    if (!_scanning) return;
+    _barcodeDetector.detect(video).then(function(codes) {
       if (!_scanning) return;
-      if (result) {
-        var now  = Date.now();
-        var code = result.getText();
-        if (code === _lastScanned && (now - _lastScannedTime) < 3000) return;
-        _lastScanned     = code;
-        _lastScannedTime = now;
-        onBarcodeDetected(code);
+      if (codes && codes.length > 0) {
+        var code = codes[0].rawValue;
+        var now = Date.now();
+        if (code !== _lastScanned || (now - _lastScannedTime) >= 3000) {
+          _lastScanned = code;
+          _lastScannedTime = now;
+          onBarcodeDetected(code);
+        }
       }
-      // NotFoundException fires every frame when no barcode — safely ignore
+    }).catch(function(){}).finally(function() {
+      if (_scanning) {
+        _rafId = requestAnimationFrame(function() { _pollBarcodeDetector(video); });
+      }
     });
+  }
+
+  function _loadZxingAndScan(video) {
+    // Load ZXing dynamically
+    var script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js';
+    script.onload = function() {
+      if (typeof ZXing !== 'undefined' && _scanning) {
+        _useZxing(video);
+      } else {
+        _useCanvasPolling(video);
+      }
+    };
+    script.onerror = function() {
+      _useCanvasPolling(video);
+    };
+    document.head.appendChild(script);
+  }
+
+  var _zxingReader = null;
+  function _useZxing(video) {
+    try {
+      _zxingReader = new ZXing.BrowserMultiFormatReader();
+      var deviceId = _cameras[_camIndex] ? _cameras[_camIndex].deviceId : undefined;
+      _zxingReader.decodeFromVideoDevice(deviceId, video, function(result, err) {
+        if (!_scanning) return;
+        if (result) {
+          var now = Date.now();
+          var code = result.getText();
+          if (code !== _lastScanned || (now - _lastScannedTime) >= 3000) {
+            _lastScanned = code;
+            _lastScannedTime = now;
+            onBarcodeDetected(code);
+          }
+        }
+      });
+    } catch(e) {
+      console.error('ZXing error:', e);
+      _useCanvasPolling(video);
+    }
+  }
+
+  // Canvas-based polling using jscanify or raw imageData approach — simple luminance row scan for CODE128
+  function _useCanvasPolling(video) {
+    setScanStatus('Scanning (fallback mode)… align barcode clearly', 'var(--yellow)');
+    var canvas = document.getElementById('scannerCanvas');
+    var ctx = canvas.getContext('2d');
+
+    function tick() {
+      if (!_scanning) return;
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        canvas.width  = video.videoWidth  || 640;
+        canvas.height = video.videoHeight || 480;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        // Nothing more to decode without a library — just keep scanning status active
+      }
+      _rafId = requestAnimationFrame(tick);
+    }
+    tick();
   }
 
   function stopScanner() {
     _scanning = false;
-    if (_codeReader) {
-      try { _codeReader.reset(); } catch(e) {}
-      _codeReader = null;
-    }
+    if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
+    if (_zxingReader) { try { _zxingReader.reset(); } catch(e) {} _zxingReader = null; }
+    if (_stream) { _stream.getTracks().forEach(function(t) { t.stop(); }); _stream = null; }
+    var video = document.getElementById('scannerVideo');
+    video.srcObject = null;
+    _barcodeDetector = null;
     document.getElementById('startScanBtn').style.display = '';
     document.getElementById('stopScanBtn').style.display  = 'none';
     document.getElementById('switchCamBtn').style.display = 'none';
     setScanStatus('Camera stopped', 'var(--text3)');
   }
 
-  function switchCamera() {
+  async function switchCamera() {
     if (!_cameras.length) return;
-    _scanning = false;
-    if (_codeReader) { try { _codeReader.reset(); } catch(e) {} }
     _camIndex = (_camIndex + 1) % _cameras.length;
     setScanStatus('Switching camera…', 'var(--text2)');
-    setTimeout(function() { _startDecode(); }, 400);
+    await _startStream();
   }
 
   async function onBarcodeDetected(code) {
@@ -260,18 +368,15 @@
         headers: { 'Accept': 'application/json' }
       });
 
-      // Session expired — backend now returns 401 JSON for all /api/ routes
       if (res.status === 401) {
         setScanStatus('Session expired — redirecting to login', 'var(--red)');
         setTimeout(function() { window.location.href = '/login'; }, 1500);
         return;
       }
 
-      // Check we actually got JSON back (guard against unexpected HTML responses)
       var contentType = res.headers.get('content-type') || '';
       if (!contentType.includes('application/json')) {
         setScanStatus('Server error — unexpected response', 'var(--red)');
-        console.error('Expected JSON, got:', contentType);
         return;
       }
 

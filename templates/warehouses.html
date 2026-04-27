@@ -170,6 +170,7 @@
           <div class="wh-card-meta">
             <span>👤 ${w.manager ? esc(w.manager) : 'Unassigned'}</span>
             ${w.capacity ? `<span>📦 ${w.capacity.toLocaleString()} units cap.</span>` : ''}
+            <span>🗃️ ${w.product_count !== undefined ? w.product_count : '—'} products</span>
           </div>
         </div>
         <div class="wh-card-actions" onclick="event.stopPropagation()">

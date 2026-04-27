@@ -901,40 +901,49 @@ function setupImportDrop() {
 // ─── Search ───────────────────────────────────────────────────────────────────
 function setupSearch() {
   const globalSearch = document.getElementById('globalSearch');
-  if (!globalSearch) return;
-  globalSearch.addEventListener('input', debounce(async () => {
-    const q = globalSearch.value.trim();
-    if (!q) { renderProductTable(state.products); return; }
-    let url = `/api/search?q=${encodeURIComponent(q)}`;
-    if (typeof _activeWarehouseId !== 'undefined' && _activeWarehouseId) {
-      url += `&warehouse_id=${_activeWarehouseId}`;
-    }
-    const res = await fetch(url);
-    const data = await res.json();
-    // If not on products page, navigate there to show results
-    if (!document.getElementById('productTableBody')) {
-      window.location.href = `/products?q=${encodeURIComponent(q)}`;
-      return;
-    }
-    renderProductTable(data.products || data);
-  }, 300));
+  if (globalSearch) {
+    globalSearch.addEventListener('input', debounce(async () => {
+      const q = globalSearch.value.trim();
+      if (!q) { renderProductTable(state.products); return; }
+      let url = `/api/search?q=${encodeURIComponent(q)}`;
+      if (typeof _activeWarehouseId !== 'undefined' && _activeWarehouseId) {
+        url += `&warehouse_id=${_activeWarehouseId}`;
+      }
+      const res = await fetch(url);
+      const data = await res.json();
+      if (!document.getElementById('productTableBody')) {
+        window.location.href = `/products?q=${encodeURIComponent(q)}`;
+        return;
+      }
+      renderProductTable(data.products || data);
+    }, 300));
+  }
 
-  document.getElementById('productSearch')?.addEventListener('input', debounce(doProductFilter, 300));
-  document.getElementById('categoryFilter')?.addEventListener('change', doProductFilter);
-  document.getElementById('statusFilter')?.addEventListener('change', doProductFilter);
+  const productSearch = document.getElementById('productSearch');
+  const categoryFilter = document.getElementById('categoryFilter');
+  const statusFilter = document.getElementById('statusFilter');
+
+  if (productSearch) productSearch.addEventListener('input', debounce(doProductFilter, 300));
+  if (categoryFilter) categoryFilter.addEventListener('change', doProductFilter);
+  if (statusFilter) statusFilter.addEventListener('change', doProductFilter);
 }
 
 async function doProductFilter() {
-  const q = document.getElementById('productSearch').value.trim();
-  const cat = document.getElementById('categoryFilter').value;
-  const status = document.getElementById('statusFilter').value;
-  let url = `/api/search?q=${encodeURIComponent(q)}&category=${encodeURIComponent(cat)}&status=${encodeURIComponent(status)}`;
+  const searchEl = document.getElementById('productSearch');
+  const catEl = document.getElementById('categoryFilter');
+  const statusEl = document.getElementById('statusFilter');
+  const q = searchEl ? searchEl.value.trim() : '';
+  const cat = catEl ? catEl.value : '';
+  const status = statusEl ? statusEl.value : '';
+  let url = `/api/search?q=${encodeURIComponent(q)}&category=${encodeURIComponent(cat)}&status=${encodeURIComponent(status)}&per_page=200`;
   if (typeof _activeWarehouseId !== 'undefined' && _activeWarehouseId) {
     url += `&warehouse_id=${_activeWarehouseId}`;
   }
-  const res = await fetch(url);
-  const data = await res.json();
-  renderProductTable(data.products || data);
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    renderProductTable(data.products || data);
+  } catch(e) { console.error(e); }
 }
 
 // ─── Notifications ────────────────────────────────────────────────────────────
@@ -1603,30 +1612,34 @@ y: { ticks: { color: '#9a9bb0', font: { size: 11 } }, grid: { color: 'rgba(255,2
 }
 
 
+document.addEventListener('DOMContentLoaded', () => {
   const themeToggle = document.getElementById('theme-toggle');
   const sunIcon = document.getElementById('theme-icon-sun');
   const moonIcon = document.getElementById('theme-icon-moon');
   const body = document.body;
 
+  if (!themeToggle) return;
+
   // Check for saved theme in localStorage
   const currentTheme = localStorage.getItem('theme');
   if (currentTheme === 'light') {
     body.classList.add('light-mode');
-    sunIcon.style.display = 'block';
-    moonIcon.style.display = 'none';
+    if (sunIcon) sunIcon.style.display = 'block';
+    if (moonIcon) moonIcon.style.display = 'none';
   }
 
   themeToggle.addEventListener('click', () => {
     body.classList.toggle('light-mode');
-    
+
     // Toggle Icons and Save Preference
     if (body.classList.contains('light-mode')) {
       localStorage.setItem('theme', 'light');
-      sunIcon.style.display = 'block';
-      moonIcon.style.display = 'none';
+      if (sunIcon) sunIcon.style.display = 'block';
+      if (moonIcon) moonIcon.style.display = 'none';
     } else {
       localStorage.setItem('theme', 'dark');
-      sunIcon.style.display = 'none';
-      moonIcon.style.display = 'block';
+      if (sunIcon) sunIcon.style.display = 'none';
+      if (moonIcon) moonIcon.style.display = 'block';
     }
   });
+});

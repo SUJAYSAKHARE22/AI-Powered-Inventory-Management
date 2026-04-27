@@ -74,90 +74,103 @@
 {% block extra_js %}
 <!-- Lightweight barcode renderer (CODE128) — no external lib needed -->
 <script>
-  // ── Minimal CODE128 barcode SVG generator ──────────────────────────────────
+  // ── Correct CODE128B barcode SVG generator ─────────────────────────────────
   (function(global) {
-    const CODE128_CHARS = ' !"#$%&\'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~';
-    const CODE128_TABLE = [
-      '11011001100','11001101100','11001100110','10010011000','10010001100','10001001100',
-      '10011001000','10011000100','10001100100','11001001000','11001000100','11000100100',
-      '10110011100','10011011100','10011001110','10111001100','10011101100','10011100110',
-      '11001110010','11001011100','11001001110','11011100100','11001110100','11101101110',
-      '11101001100','11100101100','11100100110','11101100100','11100110100','11100110010',
-      '11011011000','11011000110','11000110110','10100011000','10001011000','10001000110',
-      '10110001000','10001101000','10001100010','11010001000','11000101000','11000100010',
-      '10110111000','10110001110','10001101110','10111011000','10111000110','10001110110',
-      '11101110110','11010001110','11000101110','11011101000','11011100010','11011101110',
-      '11101011000','11101000110','11100010110','11101101000','11101100010','11100011010',
-      '11101111010','11001000010','11110001010','10100110000','10100001100','10010110000',
-      '10010000110','10000101100','10000100110','10110010000','10110000100','10011010000',
-      '10011000010','10000110100','10000110010','11000010010','11001010000','11110111010',
-      '11000010100','10001111010','10100111100','10010111100','10010011110','10111100100',
-      '10011110100','10011110010','11110100100','11110010100','11110010010','11011011110',
-      '11011110110','11110110110','10101111000','10100011110','10001011110','10111101000',
-      '10111100010','11110101000','11110100010','10111011110','10111101110','11101011110',
-      '11110101110','11010000100','11010010000','11010011100','11000111010','1100011101011'
+    // CODE128B character set (space=0 through DEL=95, index matches value)
+    var CODE128B_TABLE = [
+      '11011001100','11001101100','11001100110','10010011000','10010001100',
+      '10001001100','10011001000','10011000100','10001100100','11001001000',
+      '11001000100','11000100100','10110011100','10011011100','10011001110',
+      '10111001100','10011101100','10011100110','11001110010','11001011100',
+      '11001001110','11011100100','11001110100','11101101110','11101001100',
+      '11100101100','11100100110','11101100100','11100110100','11100110010',
+      '11011011000','11011000110','11000110110','10100011000','10001011000',
+      '10001000110','10110001000','10001101000','10001100010','11010001000',
+      '11000101000','11000100010','10110111000','10110001110','10001101110',
+      '10111011000','10111000110','10001110110','11101110110','11010001110',
+      '11000101110','11011101000','11011100010','11011101110','11101011000',
+      '11101000110','11100010110','11101101000','11101100010','11100011010',
+      '11101111010','11001000010','11110001010','10100110000','10100001100',
+      '10010110000','10010000110','10000101100','10000100110','10110010000',
+      '10110000100','10011010000','10011000010','10000110100','10000110010',
+      '11000010010','11001010000','11110111010','11000010100','10001111010',
+      '10100111100','10010111100','10010011110','10111100100','10011110100',
+      '10011110010','11110100100','11110010100','11110010010','11011011110',
+      '11011110110','11110110110','10101111000','10100011110','10001011110',
+      '10111101000','10111100010','11110101000','11110100010','10111011110',
+      '10111101110','11101011110','11110101110','11010000100','11010010000',
+      '11010011100','1100011101011'
     ];
-    const START_B = 104, STOP = 106;
+    var START_B = 104;
+    var STOP    = 106;
+
+    // CODE128B: value for char is (charCode - 32)
+    function charVal(ch) {
+      return ch.charCodeAt(0) - 32;
+    }
 
     function encode(text) {
-      let sum = START_B;
-      const bars = [CODE128_TABLE[START_B]];
-      for (let i = 0; i < text.length; i++) {
-        const idx = CODE128_CHARS.indexOf(text[i]);
-        if (idx < 0) continue;
-        sum += (idx + 1) * (i + 1 > 1 ? i : 1);
-        // simple checksum weight
-        bars.push(CODE128_TABLE[idx]);
-      }
-      // recalculate proper checksum
-      let checksum = START_B;
-      for (let i = 0; i < text.length; i++) {
-        const idx = CODE128_CHARS.indexOf(text[i]);
-        if (idx < 0) continue;
-        checksum += (idx + 1) * (i + 1);
+      var bars = [];
+      bars.push(CODE128B_TABLE[START_B]);
+
+      var checksum = START_B;
+      for (var i = 0; i < text.length; i++) {
+        var v = charVal(text[i]);
+        if (v < 0 || v > 95) v = 0; // replace unsupported chars with space
+        checksum += v * (i + 1);
+        bars.push(CODE128B_TABLE[v]);
       }
       checksum = checksum % 103;
-      bars.push(CODE128_TABLE[checksum]);
-      bars.push(CODE128_TABLE[STOP]);
+      bars.push(CODE128B_TABLE[checksum]);
+      bars.push(CODE128B_TABLE[STOP]);
       return bars.join('');
     }
 
     function renderToSvg(svgEl, text, opts) {
       opts = opts || {};
-      const barWidth = opts.barWidth || 2;
-      const height = opts.height || 80;
-      const pattern = encode(text);
-      const totalWidth = pattern.length * barWidth;
-      svgEl.setAttribute('viewBox', `0 0 ${totalWidth + 20} ${height + 30}`);
+      var barWidth   = opts.barWidth || 2;
+      var height     = opts.height   || 80;
+      var pattern    = encode(text);
+      var totalWidth = pattern.length * barWidth;
+      svgEl.setAttribute('viewBox', '0 0 ' + (totalWidth + 20) + ' ' + (height + 30));
       svgEl.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
       svgEl.innerHTML = '';
+
       // white background
-      const bg = document.createElementNS('http://www.w3.org/2000/svg','rect');
-      bg.setAttribute('width', totalWidth + 20); bg.setAttribute('height', height + 30);
-      bg.setAttribute('fill', '#fff'); svgEl.appendChild(bg);
+      var bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      bg.setAttribute('width',  totalWidth + 20);
+      bg.setAttribute('height', height + 30);
+      bg.setAttribute('fill', '#fff');
+      svgEl.appendChild(bg);
+
       // bars
-      let x = 10;
-      for (let i = 0; i < pattern.length; i++) {
+      var x = 10;
+      for (var i = 0; i < pattern.length; i++) {
         if (pattern[i] === '1') {
-          const r = document.createElementNS('http://www.w3.org/2000/svg','rect');
-          r.setAttribute('x', x); r.setAttribute('y', 5);
-          r.setAttribute('width', barWidth); r.setAttribute('height', height);
+          var r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+          r.setAttribute('x', x);
+          r.setAttribute('y', 5);
+          r.setAttribute('width',  barWidth);
+          r.setAttribute('height', height);
           r.setAttribute('fill', '#000');
           svgEl.appendChild(r);
         }
         x += barWidth;
       }
+
       // label
-      const t = document.createElementNS('http://www.w3.org/2000/svg','text');
-      t.setAttribute('x', (totalWidth + 20) / 2); t.setAttribute('y', height + 22);
+      var t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('x', (totalWidth + 20) / 2);
+      t.setAttribute('y', height + 22);
       t.setAttribute('text-anchor', 'middle');
-      t.setAttribute('font-family', 'monospace'); t.setAttribute('font-size', '11');
+      t.setAttribute('font-family', 'monospace');
+      t.setAttribute('font-size', '11');
       t.setAttribute('fill', '#333');
       t.textContent = text;
       svgEl.appendChild(t);
     }
 
-    global.BarcodeRenderer = { renderToSvg };
+    global.BarcodeRenderer = { renderToSvg: renderToSvg };
   })(window);
 </script>
 
