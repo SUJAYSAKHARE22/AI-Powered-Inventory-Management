@@ -12,10 +12,21 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
+
+# Handle Railway/Render reverse proxy so HTTPS is detected correctly
+try:
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+except ImportError:
+    pass
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///inventory.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'aria-secret-change-in-production')
 app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024  # 5MB max upload
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+# Use secure cookies on Railway (HTTPS) but allow HTTP for local dev
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('RAILWAY_ENVIRONMENT') is not None or os.environ.get('SESSION_COOKIE_SECURE', '').lower() == 'true'
 
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
@@ -90,6 +101,7 @@ class Warehouse(db.Model):
     lng = db.Column(db.Float, nullable=True)
 
     def to_dict(self):
+        product_count = Product.query.filter_by(warehouse_id=self.id, is_active=True).count() if self.id else 0
         return {
             'id': self.id,
             'user_id': self.user_id,
@@ -103,6 +115,7 @@ class Warehouse(db.Model):
             'updated_at': self.updated_at.isoformat(),
             'lat': self.lat,
             'lng': self.lng,
+            'product_count': product_count,
         }
 
 
@@ -987,7 +1000,9 @@ def search_products():
         ))
     if category:
         query = query.filter_by(category=category)
-    if status == 'low':
+    if status == 'ok':
+        query = query.filter(Product.quantity > Product.low_stock_threshold)
+    elif status == 'low':
         query = query.filter(Product.quantity > 0, Product.quantity <= Product.low_stock_threshold)
     elif status == 'out':
         query = query.filter(Product.quantity == 0)

@@ -80,14 +80,14 @@
 
 {% block extra_js %}
 <script>
-  document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('DOMContentLoaded', async () => {
     setupImageUpload();
-    loadWarehouseOptions();
+    await loadWarehouseOptions();
     const params = new URLSearchParams(window.location.search);
     const editId = params.get('edit');
     const whId = params.get('warehouse_id');
     if (editId) {
-      loadProductForEdit(parseInt(editId));
+      await loadProductForEdit(parseInt(editId));
     }
     if (whId) {
       document.getElementById('fWarehouse').value = whId;
