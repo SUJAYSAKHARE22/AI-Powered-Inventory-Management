@@ -285,13 +285,6 @@ def api_signup():
     if User.query.filter_by(email=email).first():
         return jsonify({'error': 'Email already registered'}), 400
 
-    # Check OTP was verified
-    otp_entry = _otp_store.get(email)
-    if not otp_entry or not otp_entry.get('verified'):
-        return jsonify({'error': 'Email not verified. Please verify your email first.'}), 400
-    # Clear OTP after successful registration
-    _otp_store.pop(email, None)
-
     user = User(
         username=username,
         email=email,  # mandatory — required for low-stock alert emails
@@ -363,11 +356,16 @@ def api_send_otp():
             msg['From']    = MAIL_FROM
             msg['To']      = email
             msg.attach(MIMEText(html_body, 'html'))
-            with smtplib.SMTP(MAIL_SERVER, MAIL_PORT) as server:
-                if MAIL_USE_TLS:
-                    server.starttls()
-                server.login(MAIL_USERNAME, MAIL_PASSWORD)
-                server.sendmail(MAIL_FROM, email, msg.as_string())
+            try:
+                with smtplib.SMTP_SSL(MAIL_SERVER, 465) as server:
+                    server.login(MAIL_USERNAME, MAIL_PASSWORD)
+                    server.sendmail(MAIL_FROM, email, msg.as_string())
+            except Exception:
+                with smtplib.SMTP(MAIL_SERVER, MAIL_PORT) as server:
+                    if MAIL_USE_TLS:
+                        server.starttls()
+                    server.login(MAIL_USERNAME, MAIL_PASSWORD)
+                    server.sendmail(MAIL_FROM, email, msg.as_string())
         except Exception as exc:
             app.logger.error(f'OTP email failed: {exc}')
 
@@ -1147,11 +1145,16 @@ def _send_email_async(to_addr: str, subject: str, html_body: str):
             msg['From']    = MAIL_FROM
             msg['To']      = to_addr
             msg.attach(MIMEText(html_body, 'html'))
-            with smtplib.SMTP(MAIL_SERVER, MAIL_PORT) as server:
-                if MAIL_USE_TLS:
-                    server.starttls()
-                server.login(MAIL_USERNAME, MAIL_PASSWORD)
-                server.sendmail(MAIL_FROM, to_addr, msg.as_string())
+            try:
+                with smtplib.SMTP_SSL(MAIL_SERVER, 465) as server:
+                    server.login(MAIL_USERNAME, MAIL_PASSWORD)
+                    server.sendmail(MAIL_FROM, to_addr, msg.as_string())
+            except Exception:
+                with smtplib.SMTP(MAIL_SERVER, MAIL_PORT) as server:
+                    if MAIL_USE_TLS:
+                        server.starttls()
+                    server.login(MAIL_USERNAME, MAIL_PASSWORD)
+                    server.sendmail(MAIL_FROM, to_addr, msg.as_string())
             app.logger.info(f'Low-stock email sent to {to_addr} — {subject}')
         except Exception as exc:
             app.logger.error(f'Failed to send email to {to_addr}: {exc}')
